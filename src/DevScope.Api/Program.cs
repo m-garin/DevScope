@@ -8,7 +8,22 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<DevScopeOptions>(builder.Configuration.GetSection(DevScopeOptions.SectionName));
 builder.Services.AddSingleton<IMcpConfigurationReader, McpConfigurationReader>();
-builder.Services.AddSingleton<IActivityProvider, MockActivityProvider>();
+var dataSource = builder.Configuration[$"{DevScopeOptions.SectionName}:DataSource"] ?? "Mock";
+if (dataSource.Equals("Mock", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IActivityProvider, MockActivityProvider>();
+}
+else if (dataSource.Equals("Mcp", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException(
+        "DevScope:DataSource=Mcp is not available yet: McpActivityProvider must be implemented before real data can be used.");
+}
+else
+{
+    throw new InvalidOperationException(
+        $"Unsupported DevScope:DataSource '{dataSource}'. Supported value: Mock.");
+}
+
 builder.Services.AddSingleton<ITaskAnalysisService, MockTaskAnalysisService>();
 builder.Services.AddDbContext<DevScopeDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DevScope") ?? "Data Source=data/devscope.db"));

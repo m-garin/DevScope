@@ -1,22 +1,40 @@
 {
   "mcp": {
+    "confluence": {
+      "url": "https://ai-gateway.example/mcp/confluence",
+      "type": "remote",
+      "headers": {
+        "X-MCP-Token": "REPLACE_LOCALLY",
+        "X-Request-By": "personal",
+        "X-MCP-Request-Principal": "user@example"
+      }
+    },
     "youtrack": {
-      "url": "https://gateway.example/mcp/youtrack",
+      "url": "https://ai-gateway.example/mcp/youtrack",
       "type": "remote",
       "headers": {
         "X-MCP-Token": "REPLACE_LOCALLY",
         "X-Request-By": "personal",
         "X-Youtrack-URL": "youtrack.example",
-        "X-MCP-Request-Principal": "manager@example.test"
+        "X-MCP-Request-Principal": "user@example"
       }
     },
-    "gitlab": {
-      "url": "https://gateway.example/mcp/gitlab",
+    "pyrus": {
+      "url": "https://ai-gateway.example/mcp/pyrus",
       "type": "remote",
       "headers": {
         "X-MCP-Token": "REPLACE_LOCALLY",
         "X-Request-By": "personal",
-        "X-MCP-Request-Principal": "manager@example.test"
+        "X-MCP-Request-Principal": "user@example"
+      }
+    },
+    "gitlab": {
+      "url": "https://ai-gateway.example/mcp/gitlab",
+      "type": "remote",
+      "headers": {
+        "X-MCP-Token": "REPLACE_LOCALLY",
+        "X-Request-By": "personal",
+        "X-MCP-Request-Principal": "user@example"
       }
     }
   }

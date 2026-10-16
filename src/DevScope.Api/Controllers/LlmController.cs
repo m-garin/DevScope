@@ -1,16 +1,21 @@
 using DevScope.Api.Domain;
+using DevScope.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DevScope.Api.Controllers;
 
 [ApiController]
 [Route("api/llm")]
-public sealed class LlmController : ControllerBase
+public sealed class LlmController(IApplicationSettingsService settingsService) : ControllerBase
 {
     [HttpGet("models")]
-    public IActionResult GetModels() => Ok(new
+    public async Task<IActionResult> GetModels(CancellationToken cancellationToken)
     {
-        defaultModel = LlmModels.Default,
-        models = LlmModels.All
-    });
+        var settings = await settingsService.GetAsync(cancellationToken);
+        return Ok(new
+        {
+            defaultModel = settings.DefaultLlmModel,
+            models = LlmModels.All
+        });
+    }
 }

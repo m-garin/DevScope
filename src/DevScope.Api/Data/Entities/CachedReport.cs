@@ -6,4 +6,5 @@ public sealed class CachedReport
     public required string CacheKey { get; set; }
     public required string Json { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }

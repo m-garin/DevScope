@@ -8,7 +8,8 @@ namespace DevScope.Api.Controllers;
 [Route("api/tasks")]
 public sealed class TasksController(
     IActivityProvider activityProvider,
-    ITaskAnalysisService taskAnalysisService) : ControllerBase
+    ITaskAnalysisService taskAnalysisService,
+    IApplicationSettingsService settingsService) : ControllerBase
 {
     [HttpPost("{taskId}/analysis")]
     public async Task<IActionResult> Analyze(
@@ -17,7 +18,11 @@ public sealed class TasksController(
         [FromQuery] string? model,
         CancellationToken cancellationToken)
     {
-        var selectedModel = string.IsNullOrWhiteSpace(model) ? LlmModels.Default : model;
+        var selectedModel = model;
+        if (string.IsNullOrWhiteSpace(selectedModel))
+        {
+            selectedModel = (await settingsService.GetAsync(cancellationToken)).DefaultLlmModel;
+        }
         if (!LlmModels.IsSupported(selectedModel))
         {
             return BadRequest(new { error = "Неизвестная модель LLM." });

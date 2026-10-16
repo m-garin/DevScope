@@ -4,9 +4,9 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
-import { Activity, CalendarDays, ChartNoAxesColumnIncreasing, CheckCircle2, Clock3, Database, GitMerge, ListTodo, RefreshCw, Search, Settings, Sparkles, UserRound, UsersRound } from '@lucide/vue'
+import { CalendarDays, ChartNoAxesColumnIncreasing, CheckCircle2, Clock3, Database, GitMerge, RefreshCw, Save, Search, Settings, Sparkles, UserRound } from '@lucide/vue'
 import { api } from './services/api'
-import type { Employee, LlmModelOption, PeriodSummary, TaskActivity, TaskAnalysis } from './types'
+import type { ApplicationSettings, CacheRefreshInterval, Employee, LlmModelOption, PeriodSummary, TaskActivity, TaskAnalysis } from './types'
 
 const employees = ref<Employee[]>([])
 const selectedEmployee = ref<string>('')
@@ -18,7 +18,21 @@ const analyzingTask = ref('')
 const taskAnalyses = ref<Record<string, TaskAnalysis>>({})
 const taskAnalysisErrors = ref<Record<string, string>>({})
 const llmModels = ref<LlmModelOption[]>([])
-const selectedModel = ref(localStorage.getItem('devscope.llmModel') ?? 'basic')
+const selectedModel = ref('smart')
+const dataSource = ref('Mock')
+const isMockRuntime = ref(true)
+const activePage = ref<'activity' | 'settings'>('activity')
+const applicationSettings = ref<ApplicationSettings | null>(null)
+const cacheRefreshInterval = ref<CacheRefreshInterval>('Daily')
+const settingsBusy = ref(false)
+const cacheRefreshBusy = ref(false)
+const settingsMessage = ref('')
+const settingsError = ref('')
+
+const refreshIntervalOptions = [
+  { label: 'Раз в час', value: 'Hourly' as CacheRefreshInterval },
+  { label: 'Раз в день', value: 'Daily' as CacheRefreshInterval }
+]
 
 const employeeOptions = computed(() => employees.value.map(item => ({ label: item.displayName, value: item.id })))
 const totalHours = computed(() => summary.value ? formatDuration(summary.value.loggedMinutes) : '0 ч')
@@ -67,6 +81,37 @@ async function load() {
   }
 }
 
+async function saveSettings() {
+  settingsBusy.value = true
+  settingsError.value = ''
+  settingsMessage.value = ''
+  try {
+    applicationSettings.value = await api.updateSettings(selectedModel.value, cacheRefreshInterval.value)
+    settingsMessage.value = 'Настройки сохранены.'
+    taskAnalyses.value = {}
+    taskAnalysisErrors.value = {}
+  } catch (exception) {
+    settingsError.value = exception instanceof Error ? exception.message : 'Не удалось сохранить настройки'
+  } finally {
+    settingsBusy.value = false
+  }
+}
+
+async function refreshAllCache() {
+  cacheRefreshBusy.value = true
+  settingsError.value = ''
+  settingsMessage.value = ''
+  try {
+    applicationSettings.value = await api.refreshAllActivity()
+    settingsMessage.value = 'Кэш YouTrack и GitLab обновлён.'
+    await load()
+  } catch (exception) {
+    settingsError.value = exception instanceof Error ? exception.message : 'Не удалось обновить кэш'
+  } finally {
+    cacheRefreshBusy.value = false
+  }
+}
+
 async function analyzeTask(taskId: string) {
   if (!selectedEmployee.value || analyzingTask.value) return
   analyzingTask.value = taskId
@@ -86,12 +131,14 @@ async function analyzeTask(taskId: string) {
 
 onMounted(async () => {
   try {
-    const [employeeList, modelCatalog] = await Promise.all([api.employees(), api.llmModels()])
+    const [employeeList, modelCatalog, runtime, settings] = await Promise.all([api.employees(), api.llmModels(), api.runtime(), api.settings()])
     employees.value = employeeList
     llmModels.value = modelCatalog.models
-    if (!llmModels.value.some(model => model.id === selectedModel.value)) {
-      selectedModel.value = modelCatalog.defaultModel
-    }
+    dataSource.value = runtime.dataSource
+    isMockRuntime.value = runtime.isMock
+    applicationSettings.value = settings
+    selectedModel.value = settings.defaultLlmModel
+    cacheRefreshInterval.value = settings.cacheRefreshInterval
     selectedEmployee.value = employees.value[0]?.id ?? ''
     await load()
   } catch (exception) {
@@ -107,7 +154,6 @@ watch(selectedEmployee, () => {
 })
 
 watch(selectedModel, value => {
-  localStorage.setItem('devscope.llmModel', value)
   taskAnalyses.value = {}
   taskAnalysisErrors.value = {}
 })
@@ -118,34 +164,27 @@ watch(selectedModel, value => {
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark"><ChartNoAxesColumnIncreasing :size="23" /></span><strong>DevScope</strong></div>
       <nav>
-        <a class="active"><UserRound :size="19" />Работа сотрудника</a>
-        <a><ListTodo :size="19" />Задачи</a>
-        <a><Activity :size="19" />Активность</a>
-        <a><UsersRound :size="19" />Команды</a>
+        <button :class="{ active: activePage === 'activity' }" @click="activePage = 'activity'"><UserRound :size="19" />Работа сотрудника</button>
       </nav>
-      <nav class="sidebar-bottom"><a><Settings :size="19" />Настройки</a></nav>
+      <nav class="sidebar-bottom"><button :class="{ active: activePage === 'settings' }" @click="activePage = 'settings'"><Settings :size="19" />Настройки</button></nav>
     </aside>
 
     <main>
       <header>
         <div>
           <p class="eyebrow">Fintender · Обзор деятельности</p>
-          <h1>Работа сотрудника</h1>
+          <h1>{{ activePage === 'activity' ? 'Работа сотрудника' : 'Настройки' }}</h1>
         </div>
         <div class="header-actions">
-          <label class="model-picker">
-            <span>Модель LLM</span>
-            <Select v-model="selectedModel" :options="llmModels" optionLabel="label" optionValue="id" />
-          </label>
-          <span class="mode"><Database :size="15" /> Mock MCP</span>
+          <span class="mode"><Database :size="15" /> {{ isMockRuntime ? 'Mock MCP' : 'Real MCP' }}</span>
         </div>
       </header>
 
+      <template v-if="activePage === 'activity'">
       <section class="filters card">
         <label><span>Сотрудник</span><Select v-model="selectedEmployee" :options="employeeOptions" optionLabel="label" optionValue="value" /></label>
         <label><span>Период</span><DatePicker v-model="dates" selectionMode="range" dateFormat="dd.mm.yy" :manualInput="false" showIcon /></label>
         <div class="quick"><Button label="Прошлая неделя" severity="secondary" outlined @click="setPreviousWeek" /><Button label="Эта неделя" severity="secondary" outlined @click="setThisWeek" /></div>
-        <Button @click="load"><RefreshCw :size="16" /><span>Обновить</span></Button>
       </section>
 
       <div v-if="error" class="error">{{ error }}</div>
@@ -156,7 +195,7 @@ watch(selectedModel, value => {
 
       <template v-else-if="summary">
         <section class="summary card">
-          <div class="summary-copy"><span class="round-icon"><Search :size="21" /></span><div><h2>Кратко за период</h2><p>{{ summary.narrative }}</p></div></div>
+          <div class="summary-copy"><span class="round-icon"><Search :size="21" /></span><div><h2>Кратко за период</h2><p>{{ summary.narrative }}</p><small v-if="summary.dataUpdatedAt">Данные обновлены {{ new Date(summary.dataUpdatedAt).toLocaleString('ru-RU') }}</small></div></div>
           <div class="metric"><span>Списано по worklog</span><strong>{{ totalHours }}</strong></div>
           <div class="metric"><span>На Code Review</span><strong>{{ reviewHours }}</strong></div>
           <div class="metric"><span>Задач</span><strong>{{ summary.taskCount }}</strong></div>
@@ -220,6 +259,39 @@ watch(selectedModel, value => {
             <div class="verified"><CheckCircle2 :size="18" /><span>Worklog и GitLab отображаются раздельно. GitLab-события не пересчитываются в часы.</span></div>
           </section>
         </div>
+      </template>
+      </template>
+
+      <template v-else>
+        <div v-if="settingsError" class="error">{{ settingsError }}</div>
+        <div v-if="settingsMessage" class="success">{{ settingsMessage }}</div>
+        <section class="settings-grid">
+          <article class="card settings-card">
+            <div class="settings-card-title"><span class="round-icon"><Sparkles :size="20" /></span><div><h2>Модель LLM</h2><p>Одна модель используется для полного объяснения задачи.</p></div></div>
+            <label class="settings-field">
+              <span>Модель по умолчанию</span>
+              <Select v-model="selectedModel" :options="llmModels" optionLabel="label" optionValue="id" />
+              <small>{{ llmModels.find(model => model.id === selectedModel)?.description }}</small>
+            </label>
+          </article>
+
+          <article class="card settings-card">
+            <div class="settings-card-title"><span class="round-icon"><Database :size="20" /></span><div><h2>Кэш данных</h2><p>PostgreSQL хранит результаты запросов YouTrack и GitLab. Интерфейс читает готовый снимок и не вызывает MCP при каждом открытии.</p></div></div>
+            <label class="settings-field">
+              <span>Автоматическое обновление</span>
+              <Select v-model="cacheRefreshInterval" :options="refreshIntervalOptions" optionLabel="label" optionValue="value" />
+              <small v-if="applicationSettings?.lastCacheRefreshAt">Последнее обновление: {{ new Date(applicationSettings.lastCacheRefreshAt).toLocaleString('ru-RU') }}</small>
+              <small v-else>Кэш ещё не заполнялся.</small>
+            </label>
+            <div class="cache-meta">
+              <span><strong>{{ applicationSettings?.cachedEmployeeCount ?? 0 }}</strong> сотрудников в кэше</span>
+              <span>YouTrack: задачи и worklog</span>
+              <span>GitLab: MR, ветки, коммиты и обсуждения</span>
+            </div>
+            <Button severity="secondary" outlined :loading="cacheRefreshBusy" @click="refreshAllCache"><RefreshCw :size="16" /><span>Обновить сейчас</span></Button>
+          </article>
+        </section>
+        <div class="settings-save"><Button :loading="settingsBusy" @click="saveSettings"><Save :size="16" /><span>Сохранить настройки</span></Button></div>
       </template>
     </main>
   </div>

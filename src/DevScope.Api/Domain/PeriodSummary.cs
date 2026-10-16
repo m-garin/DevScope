@@ -10,4 +10,5 @@ public sealed record PeriodSummary(
     string Narrative,
     IReadOnlyList<TaskActivity> Tasks,
     IReadOnlyList<ActivityEvent> Events,
-    IReadOnlyList<string> Limitations);
+    IReadOnlyList<string> Limitations,
+    DateTimeOffset? DataUpdatedAt = null);

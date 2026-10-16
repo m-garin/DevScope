@@ -22,6 +22,7 @@ export interface GitLabReference {
   mergeRequestState: string
   commitCount: number
   linkSource: string
+  discussionCount?: number
 }
 
 export interface TaskActivity {
@@ -60,6 +61,7 @@ export interface PeriodSummary {
   tasks: TaskActivity[]
   events: ActivityEvent[]
   limitations: string[]
+  dataUpdatedAt?: string
 }
 
 export interface TaskAnalysis {
@@ -83,5 +85,14 @@ export interface LlmModelOption {
 export interface LlmModelCatalog {
   defaultModel: string
   models: LlmModelOption[]
+}
+
+export type CacheRefreshInterval = 'Hourly' | 'Daily'
+
+export interface ApplicationSettings {
+  defaultLlmModel: string
+  cacheRefreshInterval: CacheRefreshInterval
+  lastCacheRefreshAt?: string
+  cachedEmployeeCount: number
 }
 

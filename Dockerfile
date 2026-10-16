@@ -1,7 +1,7 @@
 FROM node:24-alpine AS web-build
 WORKDIR /src/web
 COPY src/DevScope.Web/package*.json ./
-RUN npm install
+RUN npm ci
 COPY src/DevScope.Web/ ./
 RUN npm run build
 

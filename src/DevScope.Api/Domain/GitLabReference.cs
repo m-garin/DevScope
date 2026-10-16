@@ -6,4 +6,5 @@ public sealed record GitLabReference(
     int MergeRequestIid,
     string MergeRequestState,
     int CommitCount,
-    string LinkSource);
+    string LinkSource,
+    int DiscussionCount = 0);

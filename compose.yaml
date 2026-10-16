@@ -8,13 +8,33 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       DevScope__DataSource: ${DEVSCOPE_DATA_SOURCE:-Mock}
-      DevScope__McpConfigPath: /app/config/mcp.json
+      DevScope__McpConfigPath: /app/config/${DEVSCOPE_MCP_CONFIG_FILE:-mcp.json}
       DevScope__TeamsConfigPath: /app/config/teams.json
-      ConnectionStrings__DevScope: Data Source=/app/data/devscope.db
+      DevScope__ProjectKey: ${DEVSCOPE_PROJECT_KEY:-FINTDR}
+      DevScope__DailyRefreshHour: ${DEVSCOPE_DAILY_REFRESH_HOUR:-3}
+      ConnectionStrings__DevScope: Host=postgres;Port=5432;Database=${DEVSCOPE_DB_NAME:-devscope};Username=${DEVSCOPE_DB_USER:-devscope};Password=${DEVSCOPE_DB_PASSWORD:-devscope-local-only}
       TZ: Europe/Moscow
     volumes:
       - ./config:/app/config:ro
-      - devscope-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${DEVSCOPE_DB_NAME:-devscope}
+      POSTGRES_USER: ${DEVSCOPE_DB_USER:-devscope}
+      POSTGRES_PASSWORD: ${DEVSCOPE_DB_PASSWORD:-devscope-local-only}
+      TZ: Europe/Moscow
+    volumes:
+      - devscope-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DEVSCOPE_DB_USER:-devscope} -d ${DEVSCOPE_DB_NAME:-devscope}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
   mock-mcp:
@@ -32,5 +52,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  devscope-data:
+  devscope-postgres:
 

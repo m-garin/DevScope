@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+src/DevScope.Api/wwwroot/
+.dotnet/
+.env
+config/mcp.json
+config/teams.json
+**/*.db
+**/*.db-*
+**/*.tsbuildinfo
+

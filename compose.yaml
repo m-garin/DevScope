@@ -1,0 +1,38 @@
+services:
+  devscope:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${DEVSCOPE_PORT:-8080}:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      DevScope__DataSource: ${DEVSCOPE_DATA_SOURCE:-Mock}
+      DevScope__McpConfigPath: /app/config/mcp.json
+      DevScope__TeamsConfigPath: /app/config/teams.json
+      ConnectionStrings__DevScope: Data Source=/app/data/devscope.db
+      TZ: Europe/Moscow
+    volumes:
+      - ./config:/app/config:ro
+      - devscope-data:/app/data
+    restart: unless-stopped
+    depends_on:
+      mock-mcp:
+        condition: service_started
+
+  mock-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock
+    environment:
+      ASPNETCORE_URLS: http://+:8090
+      MockData__Path: /app/data/mock-data.json
+    volumes:
+      - ./data/mock-data.json:/app/data/mock-data.json:ro
+    ports:
+      - "${DEVSCOPE_MOCK_MCP_PORT:-8090}:8090"
+    restart: unless-stopped
+
+volumes:
+  devscope-data:
+

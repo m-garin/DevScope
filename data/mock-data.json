@@ -1,0 +1,147 @@
+{
+  "employees": [
+    {
+      "id": "employee-1",
+      "displayName": "Иван Петров",
+      "team": "Fintender · Разработка",
+      "role": "Backend",
+      "youTrackLogin": "ivan.petrov",
+      "gitLabUsername": "ipetrov"
+    },
+    {
+      "id": "employee-2",
+      "displayName": "Алексей Смирнов",
+      "team": "Fintender · Разработка",
+      "role": "Frontend",
+      "youTrackLogin": "alexey.smirnov",
+      "gitLabUsername": "asmirnov"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "FINTDR-50102",
+      "summary": "Миграция API на .NET 10",
+      "status": "В работе",
+      "developerId": "employee-1",
+      "estimateMinutes": 1440,
+      "url": "https://youtrack.example/issue/FINTDR-50102",
+      "parentSummary": "Платформа API",
+      "type": "Техническая задача",
+      "gitLab": {
+        "projectPath": "fintender/example-backend",
+        "branch": "feature/FINTDR-50102",
+        "mergeRequestIid": 1235,
+        "mergeRequestState": "opened",
+        "commitCount": 6,
+        "linkSource": "comment"
+      }
+    },
+    {
+      "id": "FINTDR-49880",
+      "summary": "Ошибка авторизации OAuth",
+      "status": "Исправлено",
+      "developerId": "employee-1",
+      "estimateMinutes": 720,
+      "url": "https://youtrack.example/issue/FINTDR-49880",
+      "parentSummary": "Авторизация",
+      "type": "Исправление дефекта",
+      "gitLab": {
+        "projectPath": "fintender/example-backend",
+        "branch": "fix/FINTDR-49880",
+        "mergeRequestIid": 1228,
+        "mergeRequestState": "merged",
+        "commitCount": 4,
+        "linkSource": "issue-key"
+      }
+    },
+    {
+      "id": "FINTDR-50444",
+      "summary": "Code Review: обработка платежных поручений",
+      "status": "В работе",
+      "developerId": "employee-2",
+      "estimateMinutes": 480,
+      "url": "https://youtrack.example/issue/FINTDR-50444",
+      "parentSummary": "Платёжные поручения",
+      "type": "Code Review",
+      "gitLab": {
+        "projectPath": "fintender/example-frontend",
+        "branch": "feature/FINTDR-50444",
+        "mergeRequestIid": 1241,
+        "mergeRequestState": "opened",
+        "commitCount": 3,
+        "linkSource": "comment"
+      }
+    }
+  ],
+  "worklogs": [
+    {
+      "id": "wl-1",
+      "taskId": "FINTDR-50102",
+      "authorId": "employee-1",
+      "date": "2026-10-06",
+      "durationMinutes": 240,
+      "type": "Разработка",
+      "description": "Адаптация контрактов API"
+    },
+    {
+      "id": "wl-2",
+      "taskId": "FINTDR-50102",
+      "authorId": "employee-1",
+      "date": "2026-10-08",
+      "durationMinutes": 360,
+      "type": "Разработка",
+      "description": "Миграция сервисов"
+    },
+    {
+      "id": "wl-3",
+      "taskId": "FINTDR-49880",
+      "authorId": "employee-1",
+      "date": "2026-10-09",
+      "durationMinutes": 300,
+      "type": "Исправление багов",
+      "description": "Исправление OAuth redirect"
+    },
+    {
+      "id": "wl-4",
+      "taskId": "FINTDR-50444",
+      "authorId": "employee-1",
+      "date": "2026-10-11",
+      "durationMinutes": 120,
+      "type": "Код-ревью",
+      "description": "Ревью чужого MR и проверка исправлений"
+    }
+  ],
+  "events": [
+    {
+      "id": "ev-1",
+      "taskId": "FINTDR-50102",
+      "employeeId": "employee-1",
+      "occurredAt": "2026-10-12T12:10:00+03:00",
+      "source": "GitLab",
+      "kind": "MergeRequestUpdated",
+      "title": "Обновлён MR !1235",
+      "details": "Добавлены исправления по замечаниям"
+    },
+    {
+      "id": "ev-2",
+      "taskId": "FINTDR-50102",
+      "employeeId": "employee-1",
+      "occurredAt": "2026-10-12T11:42:00+03:00",
+      "source": "GitLab",
+      "kind": "Commit",
+      "title": "Коммит в feature/FINTDR-50102",
+      "details": "Обновлены контракты API"
+    },
+    {
+      "id": "ev-3",
+      "taskId": "FINTDR-50444",
+      "employeeId": "employee-1",
+      "occurredAt": "2026-10-11T14:05:00+03:00",
+      "source": "GitLab",
+      "kind": "ReviewComment",
+      "title": "Комментарий в чужом MR !1241",
+      "details": "Оставлено замечание по обработке ошибок"
+    }
+  ]
+}
+

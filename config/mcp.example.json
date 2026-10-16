@@ -1,0 +1,24 @@
+{
+  "mcp": {
+    "youtrack": {
+      "url": "https://gateway.example/mcp/youtrack",
+      "type": "remote",
+      "headers": {
+        "X-MCP-Token": "REPLACE_LOCALLY",
+        "X-Request-By": "personal",
+        "X-Youtrack-URL": "youtrack.example",
+        "X-MCP-Request-Principal": "manager@example.test"
+      }
+    },
+    "gitlab": {
+      "url": "https://gateway.example/mcp/gitlab",
+      "type": "remote",
+      "headers": {
+        "X-MCP-Token": "REPLACE_LOCALLY",
+        "X-Request-By": "personal",
+        "X-MCP-Request-Principal": "manager@example.test"
+      }
+    }
+  }
+}
+

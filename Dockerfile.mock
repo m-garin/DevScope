@@ -1,0 +1,14 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY src/DevScope.MockMcp/DevScope.MockMcp.csproj src/DevScope.MockMcp/
+RUN dotnet restore src/DevScope.MockMcp/DevScope.MockMcp.csproj
+COPY src/DevScope.MockMcp/ src/DevScope.MockMcp/
+RUN dotnet publish src/DevScope.MockMcp/DevScope.MockMcp.csproj -c Release -o /app/publish --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /app/publish .
+RUN mkdir -p /app/data
+EXPOSE 8090
+ENTRYPOINT ["dotnet", "DevScope.MockMcp.dll"]
+

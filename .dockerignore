@@ -1,0 +1,13 @@
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/wwwroot
+.dotnet
+.git
+.env
+config/mcp.json
+config/teams.json
+**/*.db
+**/*.db-shm
+**/*.db-wal

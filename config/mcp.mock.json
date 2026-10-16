@@ -1,0 +1,15 @@
+{
+  "mcp": {
+    "youtrack": {
+      "url": "http://mock-mcp:8090/mcp",
+      "type": "remote",
+      "headers": {}
+    },
+    "gitlab": {
+      "url": "http://mock-mcp:8090/mcp",
+      "type": "remote",
+      "headers": {}
+    }
+  }
+}
+

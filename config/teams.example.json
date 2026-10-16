@@ -1,0 +1,19 @@
+{
+  "teams": [
+    {
+      "id": "fintender-dev",
+      "name": "Fintender · Разработка",
+      "members": [
+        {
+          "id": "employee-1",
+          "displayName": "Иван Петров",
+          "youTrackLogin": "ivan.petrov",
+          "email": "ivan.petrov@example.test",
+          "gitLabUsername": "ipetrov",
+          "roles": ["Backend"]
+        }
+      ]
+    }
+  ]
+}
+

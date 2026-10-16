@@ -51,6 +51,26 @@ docker compose --env-file .env.real logs --tail=100 devscope
 
 Откройте `http://127.0.0.1:8080`.
 
+### Применить изменения фронта и бэкенда
+
+После `git pull` или редактирования исходников не нужно заново поднимать весь
+compose-проект. Выполните одну команду:
+
+```powershell
+docker compose --env-file .env.real up -d --build --no-deps devscope
+```
+
+Она пересобирает и заменяет только контейнер приложения `devscope`. PostgreSQL
+не перезапускается, volume с кэшем сохраняется, реальные MCP остаются внешними.
+Docker использует кэш слоёв: `npm ci` повторяется только при изменении
+`package.json`/lock-файла, а `dotnet restore` — только при изменении `.csproj`.
+
+Посмотреть результат:
+
+```powershell
+docker compose --env-file .env.real logs --tail=100 devscope
+```
+
 Проверить соединение и увидеть реальные методы каждого MCP:
 
 ```text

@@ -14,9 +14,9 @@ public sealed class ActivityController(IActivityProvider activityProvider) : Con
         [FromQuery] DateOnly to,
         CancellationToken cancellationToken)
     {
-        if (to < from || to.DayNumber - from.DayNumber > 366)
+        if (to < from || to.DayNumber - from.DayNumber > 30)
         {
-            return BadRequest(new { error = "Некорректный диапазон дат." });
+            return BadRequest(new { error = "Выберите период не более 31 дня." });
         }
 
         var summary = await activityProvider.GetPeriodSummaryAsync(employeeId, from, to, cancellationToken);

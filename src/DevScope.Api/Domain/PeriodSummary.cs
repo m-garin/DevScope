@@ -11,4 +11,5 @@ public sealed record PeriodSummary(
     IReadOnlyList<TaskActivity> Tasks,
     IReadOnlyList<ActivityEvent> Events,
     IReadOnlyList<string> Limitations,
-    DateTimeOffset? DataUpdatedAt = null);
+    DateTimeOffset? DataUpdatedAt = null,
+    bool HasExactWorklogDurations = true);

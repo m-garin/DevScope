@@ -10,15 +10,24 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<DevScopeOptions>(builder.Configuration.GetSection(DevScopeOptions.SectionName));
 builder.Services.AddSingleton<IMcpConfigurationReader, McpConfigurationReader>();
 builder.Services.AddSingleton<IMcpGatewayClient, McpGatewayClient>();
-builder.Services.AddSingleton<ITeamDirectory, TeamDirectory>();
 var dataSource = builder.Configuration[$"{DevScopeOptions.SectionName}:DataSource"] ?? "Mock";
+var mcpConfigPath = builder.Configuration[$"{DevScopeOptions.SectionName}:McpConfigPath"] ?? string.Empty;
 if (dataSource.Equals("Mock", StringComparison.OrdinalIgnoreCase))
 {
+    builder.Services.AddSingleton<ITeamDirectory, TeamDirectory>();
     builder.Services.AddSingleton<IActivityProvider, MockActivityProvider>();
     builder.Services.AddSingleton<IActivityRefreshService, MockActivityRefreshService>();
 }
 else if (dataSource.Equals("Mcp", StringComparison.OrdinalIgnoreCase))
 {
+    if (mcpConfigPath.Contains(".mock.", StringComparison.OrdinalIgnoreCase))
+    {
+        builder.Services.AddSingleton<ITeamDirectory, TeamDirectory>();
+    }
+    else
+    {
+        builder.Services.AddSingleton<ITeamDirectory, McpTeamDirectory>();
+    }
     builder.Services.AddSingleton<McpActivityProvider>();
     builder.Services.AddScoped<IActivityRefreshService, ActivityRefreshService>();
     builder.Services.AddScoped<IActivityProvider, CachedActivityProvider>();

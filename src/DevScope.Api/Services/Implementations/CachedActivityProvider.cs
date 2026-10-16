@@ -25,11 +25,11 @@ public sealed class CachedActivityProvider(
         DateOnly to,
         CancellationToken cancellationToken)
     {
-        var snapshot = await ReadSnapshotAsync(employeeId, cancellationToken);
+        var snapshot = await ReadSnapshotAsync(employeeId, from, to, cancellationToken);
         if (snapshot is null)
         {
-            await refreshService.RefreshEmployeeAsync(employeeId, cancellationToken);
-            snapshot = await ReadSnapshotAsync(employeeId, cancellationToken);
+            await refreshService.RefreshEmployeeAsync(employeeId, from, to, cancellationToken);
+            snapshot = await ReadSnapshotAsync(employeeId, from, to, cancellationToken);
         }
         if (snapshot is null)
         {
@@ -58,6 +58,12 @@ public sealed class CachedActivityProvider(
         var reviewTasks = tasks.Count(activity => activity.Worklogs.Any(worklog =>
             worklog.Type.Contains("ревью", StringComparison.OrdinalIgnoreCase) ||
             worklog.Type.Contains("review", StringComparison.OrdinalIgnoreCase)));
+        var narrative = snapshot.Value.Summary.HasExactWorklogDurations
+            ? reviewTasks > 0
+                ? $"Списано время по {tasks.Length} задачам, включая участие в ревью по {reviewTasks}."
+                : $"Списано время по {tasks.Length} задачам."
+            : $"Списания подтверждены по {tasks.Length} задачам в " +
+              $"{tasks.SelectMany(item => item.Worklogs).Select(item => item.Date).Distinct().Count()} дн. выбранного периода.";
 
         return new PeriodSummary(
             snapshot.Value.Summary.Employee,
@@ -66,9 +72,7 @@ public sealed class CachedActivityProvider(
             tasks.Sum(task => task.LoggedMinutes),
             tasks.Length,
             tasks.Count(task => task.Task.GitLab is not null),
-            reviewTasks > 0
-                ? $"Списано время по {tasks.Length} задачам, включая участие в ревью по {reviewTasks}."
-                : $"Списано время по {tasks.Length} задачам.",
+            narrative,
             tasks,
             snapshot.Value.Summary.Events.Where(item =>
             {
@@ -76,7 +80,8 @@ public sealed class CachedActivityProvider(
                 return date >= from && date <= to;
             }).ToArray(),
             snapshot.Value.Summary.Limitations,
-            snapshot.Value.UpdatedAt);
+            snapshot.Value.UpdatedAt,
+            snapshot.Value.Summary.HasExactWorklogDurations);
     }
 
     public async Task<TaskActivity?> GetTaskActivityAsync(
@@ -84,17 +89,34 @@ public sealed class CachedActivityProvider(
         string taskId,
         CancellationToken cancellationToken)
     {
-        var snapshot = await ReadSnapshotAsync(employeeId, cancellationToken);
-        return snapshot?.Summary.Tasks.FirstOrDefault(task =>
-            task.Task.Id.Equals(taskId, StringComparison.OrdinalIgnoreCase));
+        await using var database = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var prefix = $"activity:{employeeId}:";
+        var reports = await database.CachedReports.AsNoTracking()
+            .Where(item => item.CacheKey.StartsWith(prefix))
+            .OrderByDescending(item => item.UpdatedAt)
+            .Select(item => item.Json)
+            .ToArrayAsync(cancellationToken);
+        foreach (var json in reports)
+        {
+            var summary = JsonSerializer.Deserialize<PeriodSummary>(json, JsonOptions);
+            var activity = summary?.Tasks.FirstOrDefault(item =>
+                item.Task.Id.Equals(taskId, StringComparison.OrdinalIgnoreCase));
+            if (activity is not null)
+            {
+                return activity;
+            }
+        }
+        return null;
     }
 
     private async Task<(PeriodSummary Summary, DateTimeOffset UpdatedAt)?> ReadSnapshotAsync(
         string employeeId,
+        DateOnly from,
+        DateOnly to,
         CancellationToken cancellationToken)
     {
         await using var database = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var key = ActivityRefreshService.CacheKey(employeeId);
+        var key = ActivityRefreshService.CacheKey(employeeId, from, to);
         var cached = await database.CachedReports.AsNoTracking().SingleOrDefaultAsync(
             item => item.CacheKey == key,
             cancellationToken);

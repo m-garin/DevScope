@@ -57,7 +57,14 @@ public sealed class ApplicationSettingsService(
         var cache = database.CachedReports.AsNoTracking()
             .Where(item => item.CacheKey.StartsWith("activity:"));
         var lastRefresh = await cache.MaxAsync(item => (DateTimeOffset?)item.UpdatedAt, cancellationToken);
-        var count = await cache.CountAsync(cancellationToken);
+        var keys = await cache.Select(item => item.CacheKey).ToArrayAsync(cancellationToken);
+        var count = keys.Select(key =>
+        {
+            var parts = key.Split(':');
+            return parts.Length >= 4
+                ? string.Join(':', parts[1..^2])
+                : parts.Length == 2 ? parts[1] : key;
+        }).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         return new ApplicationSettingsSnapshot(
             settings?.DefaultLlmModel ?? LlmModels.Default,
             settings?.CacheRefreshInterval ?? CacheRefreshIntervals.Daily,

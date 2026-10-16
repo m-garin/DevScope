@@ -10,7 +10,10 @@ import type { ApplicationSettings, CacheRefreshInterval, Employee, LlmModelOptio
 
 const employees = ref<Employee[]>([])
 const selectedEmployee = ref<string>('')
-const dates = ref<Date[]>([new Date(2026, 9, 6), new Date(2026, 9, 12)])
+const today = new Date()
+const mondayOffset = (today.getDay() + 6) % 7
+const currentMonday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - mondayOffset)
+const dates = ref<Date[]>([currentMonday, new Date(currentMonday.getFullYear(), currentMonday.getMonth(), currentMonday.getDate() + 6)])
 const summary = ref<PeriodSummary | null>(null)
 const loading = ref(true)
 const error = ref('')
@@ -36,6 +39,8 @@ const refreshIntervalOptions = [
 
 const employeeOptions = computed(() => employees.value.map(item => ({ label: item.displayName, value: item.id })))
 const totalHours = computed(() => summary.value ? formatDuration(summary.value.loggedMinutes) : '0 ч')
+const activeDays = computed(() => new Set(summary.value?.tasks.flatMap(task => task.worklogs.map(item => item.date)) ?? []).size)
+const worklogPresenceCount = computed(() => summary.value?.tasks.reduce((sum, task) => sum + task.worklogs.length, 0) ?? 0)
 const reviewHours = computed(() => {
   const minutes = summary.value?.tasks.flatMap(task => task.worklogs)
     .filter(worklog => worklog.type.toLocaleLowerCase().includes('ревью'))
@@ -61,11 +66,14 @@ function isReview(task: TaskActivity) {
 }
 
 function setThisWeek() {
-  dates.value = [new Date(2026, 9, 12), new Date(2026, 9, 18)]
+  dates.value = [currentMonday, new Date(currentMonday.getFullYear(), currentMonday.getMonth(), currentMonday.getDate() + 6)]
 }
 
 function setPreviousWeek() {
-  dates.value = [new Date(2026, 9, 5), new Date(2026, 9, 11)]
+  dates.value = [
+    new Date(currentMonday.getFullYear(), currentMonday.getMonth(), currentMonday.getDate() - 7),
+    new Date(currentMonday.getFullYear(), currentMonday.getMonth(), currentMonday.getDate() - 1)
+  ]
 }
 
 async function load() {
@@ -79,6 +87,12 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function changeEmployee() {
+  taskAnalyses.value = {}
+  taskAnalysisErrors.value = {}
+  void load()
 }
 
 async function saveSettings() {
@@ -147,11 +161,9 @@ onMounted(async () => {
   }
 })
 
-watch(selectedEmployee, () => {
-  taskAnalyses.value = {}
-  taskAnalysisErrors.value = {}
-  void load()
-})
+watch(dates, value => {
+  if (value.length === 2 && value[1]) void load()
+}, { deep: true })
 
 watch(selectedModel, value => {
   taskAnalyses.value = {}
@@ -182,7 +194,7 @@ watch(selectedModel, value => {
 
       <template v-if="activePage === 'activity'">
       <section class="filters card">
-        <label><span>Сотрудник</span><Select v-model="selectedEmployee" :options="employeeOptions" optionLabel="label" optionValue="value" /></label>
+        <label><span>Сотрудник</span><Select v-model="selectedEmployee" :options="employeeOptions" optionLabel="label" optionValue="value" @change="changeEmployee" /></label>
         <label><span>Период</span><DatePicker v-model="dates" selectionMode="range" dateFormat="dd.mm.yy" :manualInput="false" showIcon /></label>
         <div class="quick"><Button label="Прошлая неделя" severity="secondary" outlined @click="setPreviousWeek" /><Button label="Эта неделя" severity="secondary" outlined @click="setThisWeek" /></div>
       </section>
@@ -196,8 +208,10 @@ watch(selectedModel, value => {
       <template v-else-if="summary">
         <section class="summary card">
           <div class="summary-copy"><span class="round-icon"><Search :size="21" /></span><div><h2>Кратко за период</h2><p>{{ summary.narrative }}</p><small v-if="summary.dataUpdatedAt">Данные обновлены {{ new Date(summary.dataUpdatedAt).toLocaleString('ru-RU') }}</small></div></div>
-          <div class="metric"><span>Списано по worklog</span><strong>{{ totalHours }}</strong></div>
-          <div class="metric"><span>На Code Review</span><strong>{{ reviewHours }}</strong></div>
+          <div v-if="summary.hasExactWorklogDurations" class="metric"><span>Списано по worklog</span><strong>{{ totalHours }}</strong></div>
+          <div v-else class="metric"><span>Дней со списаниями</span><strong>{{ activeDays }}</strong></div>
+          <div v-if="summary.hasExactWorklogDurations" class="metric"><span>На Code Review</span><strong>{{ reviewHours }}</strong></div>
+          <div v-else class="metric"><span>Задача × день</span><strong>{{ worklogPresenceCount }}</strong></div>
           <div class="metric"><span>Задач</span><strong>{{ summary.taskCount }}</strong></div>
           <div class="metric"><span>Связанных MR</span><strong>{{ summary.mergeRequestCount }}</strong></div>
         </section>
@@ -210,10 +224,10 @@ watch(selectedModel, value => {
                 <div><h3><a :href="item.task.url">{{ item.task.id }}</a> · {{ item.task.summary }}</h3><span v-if="!item.isOwnTask" class="foreign">Чужая задача</span></div>
                 <span class="status">{{ item.task.status }}</span>
               </div>
-              <div class="worklog-total"><Clock3 :size="18" /><strong>{{ formatDuration(item.loggedMinutes) }}</strong><span>списал выбранный сотрудник</span></div>
+              <div class="worklog-total"><Clock3 :size="18" /><strong>{{ summary.hasExactWorklogDurations ? formatDuration(item.loggedMinutes) : `${item.worklogs.length} дн.` }}</strong><span>{{ summary.hasExactWorklogDurations ? 'списал выбранный сотрудник' : 'подтверждены списания сотрудника' }}</span></div>
               <div class="worklogs">
                 <div v-for="worklog in item.worklogs" :key="worklog.id">
-                  <span>{{ new Date(worklog.date).toLocaleDateString('ru-RU') }}</span><strong>{{ worklog.type }}</strong><span>{{ formatDuration(worklog.durationMinutes) }}</span><em>{{ worklog.description }}</em>
+                  <span>{{ new Date(worklog.date).toLocaleDateString('ru-RU') }}</span><strong>{{ worklog.type }}</strong><span>{{ summary.hasExactWorklogDurations ? formatDuration(worklog.durationMinutes) : 'есть' }}</span><em>{{ worklog.description }}</em>
                 </div>
               </div>
               <div v-if="item.task.gitLab" class="gitlab-row">
@@ -285,7 +299,7 @@ watch(selectedModel, value => {
             </label>
             <div class="cache-meta">
               <span><strong>{{ applicationSettings?.cachedEmployeeCount ?? 0 }}</strong> сотрудников в кэше</span>
-              <span>YouTrack: задачи и worklog</span>
+              <span>YouTrack: задачи и дни списаний</span>
               <span>GitLab: MR, ветки, коммиты и обсуждения</span>
             </div>
             <Button severity="secondary" outlined :loading="cacheRefreshBusy" @click="refreshAllCache"><RefreshCw :size="16" /><span>Обновить сейчас</span></Button>

@@ -12,9 +12,19 @@ public sealed class ActivityRefreshController(
     [HttpPost]
     public async Task<IActionResult> Refresh(
         [FromQuery] string employeeId,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
         CancellationToken cancellationToken)
     {
-        var refreshedAt = await refreshService.RefreshEmployeeAsync(employeeId, cancellationToken);
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var rangeFrom = from ?? today.AddDays(-6);
+        var rangeTo = to ?? today;
+        if (rangeTo < rangeFrom || rangeTo.DayNumber - rangeFrom.DayNumber > 30)
+        {
+            return BadRequest(new { error = "Некорректный диапазон дат." });
+        }
+        var refreshedAt = await refreshService.RefreshEmployeeAsync(
+            employeeId, rangeFrom, rangeTo, cancellationToken);
         return refreshedAt is null
             ? NotFound(new { error = "Сотрудник не найден." })
             : Ok(new { refreshedAt });

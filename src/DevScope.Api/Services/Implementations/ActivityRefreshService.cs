@@ -8,7 +8,6 @@ namespace DevScope.Api.Services.Implementations;
 
 public sealed class ActivityRefreshService(
     McpActivityProvider source,
-    ITeamDirectory teamDirectory,
     IDbContextFactory<DevScopeDbContext> dbContextFactory) : IActivityRefreshService
 {
     private static readonly SemaphoreSlim RefreshLock = new(1, 1);
@@ -16,16 +15,17 @@ public sealed class ActivityRefreshService(
 
     public async Task<DateTimeOffset?> RefreshEmployeeAsync(
         string employeeId,
+        DateOnly from,
+        DateOnly to,
         CancellationToken cancellationToken)
     {
         await RefreshLock.WaitAsync(cancellationToken);
         try
         {
-            var today = DateOnly.FromDateTime(DateTime.Today);
             var summary = await source.GetPeriodSummaryAsync(
                 employeeId,
-                today.AddDays(-365),
-                today,
+                from,
+                to,
                 cancellationToken);
             if (summary is null)
             {
@@ -34,7 +34,7 @@ public sealed class ActivityRefreshService(
 
             var now = DateTimeOffset.UtcNow;
             await using var database = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var key = CacheKey(employeeId);
+            var key = CacheKey(employeeId, from, to);
             var cached = await database.CachedReports.SingleOrDefaultAsync(
                 item => item.CacheKey == key,
                 cancellationToken);
@@ -65,13 +65,31 @@ public sealed class ActivityRefreshService(
 
     public async Task RefreshAllAsync(CancellationToken cancellationToken)
     {
-        var employees = await teamDirectory.GetEmployeesAsync(cancellationToken);
-        foreach (var employee in employees)
+        await using var database = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var keys = await database.CachedReports.AsNoTracking()
+            .Where(item => item.CacheKey.StartsWith("activity:"))
+            .Select(item => item.CacheKey)
+            .ToArrayAsync(cancellationToken);
+        var ranges = keys.Select(TryParseCacheKey).Where(item => item is not null).Distinct().ToArray();
+        foreach (var range in ranges)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await RefreshEmployeeAsync(employee.Id, cancellationToken);
+            await RefreshEmployeeAsync(range!.Value.EmployeeId, range.Value.From, range.Value.To, cancellationToken);
         }
     }
 
-    internal static string CacheKey(string employeeId) => $"activity:{employeeId}";
+    internal static string CacheKey(string employeeId, DateOnly from, DateOnly to) =>
+        $"activity:{employeeId}:{from:yyyy-MM-dd}:{to:yyyy-MM-dd}";
+
+    private static (string EmployeeId, DateOnly From, DateOnly To)? TryParseCacheKey(string key)
+    {
+        var parts = key.Split(':');
+        if (parts.Length < 4 ||
+            !DateOnly.TryParse(parts[^2], out var from) ||
+            !DateOnly.TryParse(parts[^1], out var to))
+        {
+            return null;
+        }
+        return (string.Join(':', parts[1..^2]), from, to);
+    }
 }

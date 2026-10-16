@@ -62,6 +62,7 @@ export interface PeriodSummary {
   events: ActivityEvent[]
   limitations: string[]
   dataUpdatedAt?: string
+  hasExactWorklogDurations: boolean
 }
 
 export interface TaskAnalysis {

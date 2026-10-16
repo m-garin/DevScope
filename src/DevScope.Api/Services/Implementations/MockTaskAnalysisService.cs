@@ -20,13 +20,17 @@ public sealed class MockTaskAnalysisService : ITaskAnalysisService
         var context = string.IsNullOrWhiteSpace(task.ParentSummary)
             ? task.Summary
             : $"{task.ParentSummary} › {task.Summary}";
+        var contribution = activity.LoggedMinutes > 0
+            ? $"Сотрудник списал {FormatDuration(activity.LoggedMinutes)}. Типы работ: {workTypes}. Выполненные действия: {workDetails}."
+            : $"Списания сотрудника подтверждены в {activity.Worklogs.Select(item => item.Date).Distinct().Count()} дн. " +
+              "YouTrack MCP не возвращает длительность и текст отдельных записей.";
 
         return new TaskAnalysis(
             task.Id,
             context,
             task.Type ?? "Задача",
             PurposeFor(task.Id, task.Summary),
-            $"Сотрудник списал {FormatDuration(activity.LoggedMinutes)}. Типы работ: {workTypes}. Выполненные действия: {workDetails}.",
+            contribution,
             gitLab is null
                 ? $"Работа зафиксирована в YouTrack. Связанный MR не найден; текущий статус задачи — {task.Status}."
                 : $"Работа подтверждается связанной активностью GitLab. MR сейчас имеет статус {gitLab.MergeRequestState}; статус задачи — {task.Status}.",

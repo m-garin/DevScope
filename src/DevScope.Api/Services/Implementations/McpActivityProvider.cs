@@ -17,16 +17,14 @@ public sealed partial class McpActivityProvider(
 {
     private const string YouTrackServer = "youtrack";
     private const string GitLabServer = "gitlab";
-    private const int PageSize = 100;
+    private const int PageSize = 20;
+    private const int MaxDetailedPeriodDays = 31;
     private static readonly string[] WorkItemToolCandidates =
-    [
-        "youtrack_search_work_items",
-        "search_work_items",
-        "youtrack_search_worklogs",
-        "search_worklogs"
-    ];
+        ["youtrack_search_work_items", "search_work_items", "youtrack_search_worklogs", "search_worklogs"];
+    private static readonly string[] SearchIssueToolCandidates = ["youtrack_search_issues", "search_issues"];
     private static readonly string[] IssueToolCandidates = ["youtrack_get_issue", "get_issue"];
     private static readonly string[] CommentToolCandidates = ["youtrack_get_issue_comments", "get_issue_comments"];
+    private static readonly string[] MergeRequestListToolCandidates = ["gitlab_gitlab_mr_list", "gitlab_mr_list", "mr_list"];
     private static readonly string[] MergeRequestToolCandidates = ["gitlab_gitlab_mr_details", "gitlab_mr_details", "mr_details"];
     private readonly ConcurrentDictionary<string, TaskActivity> _taskCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -47,48 +45,82 @@ public sealed partial class McpActivityProvider(
 
         if (string.IsNullOrWhiteSpace(employee.YouTrackLogin))
         {
-            throw new McpIntegrationException($"Для сотрудника '{employee.DisplayName}' не указан youTrackLogin в teams.json.");
+            throw new McpIntegrationException($"Для сотрудника '{employee.DisplayName}' YouTrack не вернул login.");
         }
 
         var tools = await mcp.ListToolsAsync(YouTrackServer, cancellationToken);
         var toolNames = tools.Select(tool => tool.Name).ToArray();
-        var workItemTool = ResolveTool(toolNames, WorkItemToolCandidates)
-            ?? throw MissingWorkItemsTool(toolNames);
         var issueTool = ResolveTool(toolNames, IssueToolCandidates);
         var commentTool = ResolveTool(toolNames, CommentToolCandidates);
         var mergeRequestTool = await ResolveMergeRequestToolAsync(cancellationToken);
-        var rawWorkItems = await ReadAllWorkItemsAsync(workItemTool, employee, from, to, cancellationToken);
-        var worklogs = rawWorkItems
-            .Select(item => ParseWorklog(item, employee))
-            .Where(worklog => worklog is not null)
-            .Cast<Worklog>()
-            .Where(worklog => worklog.Date >= from && worklog.Date <= to)
-            .ToArray();
-
-        var limitations = new List<string>();
-        if (rawWorkItems.Count > 0 && worklogs.Length == 0)
+        var mergeRequestListTool = await ResolveMergeRequestListToolAsync(cancellationToken);
+        var workItemTool = ResolveTool(toolNames, WorkItemToolCandidates);
+        if (workItemTool is not null)
         {
-            limitations.Add("MCP вернул work items, но их формат не удалось распознать.");
+            return await GetExactPeriodSummaryAsync(
+                workItemTool, issueTool, commentTool, mergeRequestListTool, mergeRequestTool,
+                employee, from, to, cancellationToken);
         }
+
+        var periodDays = to.DayNumber - from.DayNumber + 1;
+        if (periodDays > MaxDetailedPeriodDays)
+        {
+            throw new McpIntegrationException(
+                $"Для дневной раскладки списаний выберите период не более {MaxDetailedPeriodDays} дней.");
+        }
+
+        var searchIssueTool = ResolveTool(toolNames, SearchIssueToolCandidates)
+            ?? throw MissingSearchIssuesTool(toolNames);
+        var periodIssues = await ReadAllIssuesAsync(searchIssueTool, employee, from, to, cancellationToken);
+        var issueById = periodIssues
+            .Select(item => (Id: GetTaskId(item), Item: item))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .GroupBy(item => item.Id!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Item, StringComparer.OrdinalIgnoreCase);
+
+        var datesByTask = new Dictionary<string, HashSet<DateOnly>>(StringComparer.OrdinalIgnoreCase);
+        for (var date = from; date <= to; date = date.AddDays(1))
+        {
+            var dailyIssues = await ReadAllIssuesAsync(searchIssueTool, employee, date, date, cancellationToken);
+            foreach (var issue in dailyIssues)
+            {
+                var taskId = GetTaskId(issue);
+                if (string.IsNullOrWhiteSpace(taskId))
+                {
+                    continue;
+                }
+                if (!datesByTask.TryGetValue(taskId, out var dates))
+                {
+                    dates = [];
+                    datesByTask[taskId] = dates;
+                }
+                dates.Add(date);
+                issueById.TryAdd(taskId, issue);
+            }
+        }
+
+        var limitations = new List<string>
+        {
+            "YouTrack MCP подтверждает наличие списаний по автору и дням, но не возвращает минуты, тип и текст отдельных worklog. Накопительные поля задачи не используются как часы выбранного периода."
+        };
 
         var taskActivities = new List<TaskActivity>();
         var gitLabEvents = new List<ActivityEvent>();
-        foreach (var group in worklogs.GroupBy(worklog => worklog.TaskId, StringComparer.OrdinalIgnoreCase))
+        foreach (var pair in issueById)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var raw = rawWorkItems
-                .Where(item => string.Equals(GetTaskId(item), group.Key, StringComparison.OrdinalIgnoreCase))
-                .Select(item => (JsonElement?)item)
-                .FirstOrDefault();
-            var task = raw is null ? null : ParseEmbeddedTask(raw.Value, employee);
+            var taskId = pair.Key;
+            var issuePayload = pair.Value;
+            var task = ParseIssue(pair.Value, employee);
 
             if (issueTool is not null)
             {
                 var issue = await mcp.CallToolAsync(
                     YouTrackServer,
                     issueTool,
-                    new Dictionary<string, object?> { ["issueId"] = group.Key },
+                    new Dictionary<string, object?> { ["issueId"] = taskId },
                     cancellationToken);
+                issuePayload = issue;
                 task = ParseIssue(issue, employee) ?? task;
             }
 
@@ -99,12 +131,21 @@ public sealed partial class McpActivityProvider(
                     commentTool,
                     new Dictionary<string, object?>
                     {
-                        ["issueId"] = group.Key,
+                        ["issueId"] = taskId,
                         ["offset"] = 0,
-                        ["limit"] = 100
+                        ["limit"] = 10
                     },
                     cancellationToken);
                 task = task with { GitLab = ParseGitLabReferenceFromText(comments.GetRawText(), "comment") };
+            }
+
+            if (task is not null && task.GitLab is null && mergeRequestListTool is not null)
+            {
+                task = task with
+                {
+                    GitLab = await FindMergeRequestByTaskKeyAsync(
+                        mergeRequestListTool, issuePayload, taskId, cancellationToken)
+                };
             }
 
             if (task?.GitLab is not null && mergeRequestTool is not null)
@@ -125,11 +166,25 @@ public sealed partial class McpActivityProvider(
                 gitLabEvents.AddRange(ParseGitLabEvents(details, task.Id, employee.Id, task.GitLab));
             }
 
-            task ??= new WorkTask(group.Key, group.Key, "Неизвестно", null, null, string.Empty, null);
-            var taskWorklogs = group.OrderByDescending(item => item.Date).ToArray();
+            task ??= new WorkTask(taskId, taskId, "Неизвестно", null, null, string.Empty, null);
+            var taskWorklogs = datesByTask.TryGetValue(taskId, out var taskDates)
+                ? taskDates.OrderByDescending(date => date).Select(date => new Worklog(
+                    $"presence:{employee.Id}:{taskId}:{date:yyyyMMdd}",
+                    taskId,
+                    employee.Id,
+                    date,
+                    0,
+                    "Списание",
+                    "Наличие списания подтверждено фильтрами work author и work date."))
+                    .ToArray()
+                : [];
+            if (taskWorklogs.Length == 0)
+            {
+                continue;
+            }
             var activity = new TaskActivity(
                 task,
-                taskWorklogs.Sum(item => item.DurationMinutes),
+                0,
                 taskWorklogs,
                 IsEmployeeDeveloper(task.DeveloperId, employee));
             taskActivities.Add(activity);
@@ -139,13 +194,139 @@ public sealed partial class McpActivityProvider(
         var ordered = taskActivities
             .OrderByDescending(activity => activity.Worklogs.Max(worklog => worklog.Date))
             .ToArray();
-        var reviewTaskCount = ordered.Count(activity => activity.Worklogs.Any(worklog =>
-            worklog.Type.Contains("ревью", StringComparison.OrdinalIgnoreCase) ||
-            worklog.Type.Contains("review", StringComparison.OrdinalIgnoreCase)));
-        var narrative = reviewTaskCount > 0
-            ? $"Списано время по {ordered.Length} задачам, включая участие в ревью по {reviewTaskCount}."
-            : $"Списано время по {ordered.Length} задачам.";
+        var activeDays = ordered.SelectMany(item => item.Worklogs).Select(item => item.Date).Distinct().Count();
+        var narrative = $"Списания подтверждены по {ordered.Length} задачам в {activeDays} дн. выбранного периода.";
+        var events = ordered
+            .SelectMany(activity => activity.Worklogs.Select(worklog => new ActivityEvent(
+                worklog.Id,
+                activity.Task.Id,
+                employee.Id,
+                new DateTimeOffset(worklog.Date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
+                "YouTrack",
+                "WorklogPresence",
+                $"Есть списание в {activity.Task.Id}",
+                activity.Task.Summary)))
+            .Concat(gitLabEvents)
+            .OrderByDescending(item => item.OccurredAt)
+            .ToArray();
 
+        return new PeriodSummary(
+            employee,
+            from,
+            to,
+            0,
+            ordered.Length,
+            ordered.Count(item => item.Task.GitLab is not null),
+            narrative,
+            ordered,
+            events,
+            limitations.Distinct().ToArray(),
+            HasExactWorklogDurations: false);
+    }
+
+    private async Task<PeriodSummary> GetExactPeriodSummaryAsync(
+        string workItemTool,
+        string? issueTool,
+        string? commentTool,
+        string? mergeRequestListTool,
+        string? mergeRequestTool,
+        Employee employee,
+        DateOnly from,
+        DateOnly to,
+        CancellationToken cancellationToken)
+    {
+        var rawWorkItems = await ReadAllWorkItemsAsync(
+            workItemTool, employee, from, to, cancellationToken);
+        var worklogs = rawWorkItems
+            .Select(item => ParseWorklog(item, employee))
+            .Where(item => item is not null)
+            .Cast<Worklog>()
+            .Where(item => item.Date >= from && item.Date <= to)
+            .ToArray();
+        var limitations = rawWorkItems.Count > 0 && worklogs.Length == 0
+            ? new[] { "MCP вернул work items, но их формат не удалось распознать." }
+            : Array.Empty<string>();
+        var activities = new List<TaskActivity>();
+        var events = new List<ActivityEvent>();
+
+        foreach (var group in worklogs.GroupBy(item => item.TaskId, StringComparer.OrdinalIgnoreCase))
+        {
+            var taskId = group.Key;
+            var raw = rawWorkItems.FirstOrDefault(item =>
+                string.Equals(GetTaskId(item), taskId, StringComparison.OrdinalIgnoreCase));
+            var issuePayload = raw.ValueKind == JsonValueKind.Undefined ? default : raw;
+            var task = raw.ValueKind == JsonValueKind.Undefined ? null : ParseEmbeddedTask(raw, employee);
+            if (issueTool is not null)
+            {
+                var issue = await mcp.CallToolAsync(
+                    YouTrackServer, issueTool,
+                    new Dictionary<string, object?> { ["issueId"] = taskId },
+                    cancellationToken);
+                issuePayload = issue;
+                task = ParseIssue(issue, employee) ?? task;
+            }
+            if (task is not null && task.GitLab is null && commentTool is not null)
+            {
+                var comments = await mcp.CallToolAsync(
+                    YouTrackServer, commentTool,
+                    new Dictionary<string, object?>
+                    {
+                        ["issueId"] = taskId,
+                        ["offset"] = 0,
+                        ["limit"] = 10
+                    },
+                    cancellationToken);
+                task = task with { GitLab = ParseGitLabReferenceFromText(comments.GetRawText(), "comment") };
+            }
+            if (task is not null && task.GitLab is null && mergeRequestListTool is not null &&
+                issuePayload.ValueKind != JsonValueKind.Undefined)
+            {
+                task = task with
+                {
+                    GitLab = await FindMergeRequestByTaskKeyAsync(
+                        mergeRequestListTool, issuePayload, taskId, cancellationToken)
+                };
+            }
+            if (task?.GitLab is not null && mergeRequestTool is not null)
+            {
+                var details = await mcp.CallToolAsync(
+                    GitLabServer, mergeRequestTool,
+                    new Dictionary<string, object?>
+                    {
+                        ["project_id"] = task.GitLab.ProjectPath,
+                        ["mr_iid"] = task.GitLab.MergeRequestIid,
+                        ["include_changes"] = false,
+                        ["include_commits"] = true,
+                        ["include_discussions"] = true
+                    },
+                    cancellationToken);
+                task = task with { GitLab = EnrichGitLabReference(task.GitLab, details) };
+                events.AddRange(ParseGitLabEvents(details, task.Id, employee.Id, task.GitLab));
+            }
+
+            task ??= new WorkTask(taskId, taskId, "Неизвестно", null, null, string.Empty, null);
+            var taskWorklogs = group.OrderByDescending(item => item.Date).ToArray();
+            events.AddRange(taskWorklogs.Select(item => new ActivityEvent(
+                item.Id,
+                taskId,
+                employee.Id,
+                new DateTimeOffset(item.Date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
+                "YouTrack",
+                "Worklog",
+                $"Списано {item.DurationMinutes} мин в {taskId}",
+                item.Description)));
+            var activity = new TaskActivity(
+                task,
+                taskWorklogs.Sum(item => item.DurationMinutes),
+                taskWorklogs,
+                IsEmployeeDeveloper(task.DeveloperId, employee));
+            activities.Add(activity);
+            _taskCache[$"{employee.Id}:{task.Id}"] = activity;
+        }
+
+        var ordered = activities
+            .OrderByDescending(item => item.Worklogs.Max(worklog => worklog.Date))
+            .ToArray();
         return new PeriodSummary(
             employee,
             from,
@@ -153,20 +334,10 @@ public sealed partial class McpActivityProvider(
             worklogs.Sum(item => item.DurationMinutes),
             ordered.Length,
             ordered.Count(item => item.Task.GitLab is not null),
-            narrative,
+            $"Списано время по {ordered.Length} задачам.",
             ordered,
-            gitLabEvents.OrderByDescending(item => item.OccurredAt).ToArray(),
-            limitations.Distinct().ToArray());
-    }
-
-    public Task<TaskActivity?> GetTaskActivityAsync(
-        string employeeId,
-        string taskId,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        _taskCache.TryGetValue($"{employeeId}:{taskId}", out var activity);
-        return Task.FromResult(activity);
+            events.OrderByDescending(item => item.OccurredAt).ToArray(),
+            limitations);
     }
 
     private async Task<List<JsonElement>> ReadAllWorkItemsAsync(
@@ -190,15 +361,63 @@ public sealed partial class McpActivityProvider(
                     ["dateFrom"] = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     ["dateTo"] = to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     ["offset"] = offset,
+                    ["limit"] = 100
+                },
+                cancellationToken);
+            var page = payload.FindArray("workItemsPage", "workItems", "worklogs", "items", "data")
+                ?? throw new McpIntegrationException(
+                    $"MCP tool '{toolName}' вернул ответ без массива workItemsPage/workItems/worklogs/items.");
+            var items = page.EnumerateArray().Select(item => item.Clone()).ToArray();
+            result.AddRange(items);
+            var hasNext = payload.FirstProperty("hasNextPage", "hasMore") is { } next &&
+                next.ValueKind == JsonValueKind.True;
+            if (!hasNext || items.Length == 0)
+            {
+                break;
+            }
+            offset = payload.FirstProperty("nextPageOffset", "nextOffset").IntValue() ?? offset + items.Length;
+        }
+        return result;
+    }
+
+    public Task<TaskActivity?> GetTaskActivityAsync(
+        string employeeId,
+        string taskId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _taskCache.TryGetValue($"{employeeId}:{taskId}", out var activity);
+        return Task.FromResult(activity);
+    }
+
+    private async Task<List<JsonElement>> ReadAllIssuesAsync(
+        string toolName,
+        Employee employee,
+        DateOnly from,
+        DateOnly to,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<JsonElement>();
+        var offset = 0;
+        while (true)
+        {
+            var payload = await mcp.CallToolAsync(
+                YouTrackServer,
+                toolName,
+                new Dictionary<string, object?>
+                {
+                    ["query"] = BuildWorklogIssueQuery(options.Value.ProjectKey, employee.YouTrackLogin, from, to),
+                    ["customFieldsToReturn"] = Array.Empty<string>(),
+                    ["offset"] = offset,
                     ["limit"] = PageSize
                 },
                 cancellationToken);
 
-            var page = payload.FindArray("workItemsPage", "workItems", "worklogs", "items", "data");
+            var page = payload.FindArray("issuesPage", "issues", "items", "data");
             if (page is null)
             {
                 throw new McpIntegrationException(
-                    $"MCP tool '{toolName}' вернул ответ без массива workItemsPage/workItems/worklogs/items.");
+                    $"MCP tool '{toolName}' вернул ответ без массива issuesPage/issues/items.");
             }
 
             var items = page.Value.EnumerateArray().Select(item => item.Clone()).ToArray();
@@ -213,12 +432,21 @@ public sealed partial class McpActivityProvider(
             offset = payload.FirstProperty("nextPageOffset", "nextOffset").IntValue() ?? offset + items.Length;
             if (result.Count > 10_000)
             {
-                throw new McpIntegrationException("MCP вернул более 10 000 списаний; уменьшите период.");
+                throw new McpIntegrationException("MCP вернул более 10 000 задач; уменьшите период.");
             }
         }
 
         return result;
     }
+
+    private static string BuildWorklogIssueQuery(
+        string projectKey,
+        string authorLogin,
+        DateOnly from,
+        DateOnly to) =>
+        $"project: {projectKey} work author: {authorLogin} work date: " +
+        $"{from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} .. " +
+        $"{to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} sort by: updated desc";
 
     private static Worklog? ParseWorklog(JsonElement item, Employee employee)
     {
@@ -271,7 +499,7 @@ public sealed partial class McpActivityProvider(
 
     private static WorkTask? ParseIssue(JsonElement issue, Employee employee)
     {
-        var id = issue.FirstProperty("id", "idReadable", "issueId").StringValue();
+        var id = issue.FirstProperty("idReadable", "issueId", "id").StringValue();
         if (string.IsNullOrWhiteSpace(id))
         {
             return null;
@@ -348,7 +576,8 @@ public sealed partial class McpActivityProvider(
         var text = string.Join(' ', new[]
         {
             issue.FirstProperty("description").StringValue(),
-            issue.FirstProperty("summary").StringValue()
+            issue.FirstProperty("summary").StringValue(),
+            issue.FirstProperty("customFields") is { } customFields ? customFields.GetRawText() : null
         }.Where(value => !string.IsNullOrWhiteSpace(value)));
         return ParseGitLabReferenceFromText(text, "description");
     }
@@ -364,6 +593,114 @@ public sealed partial class McpActivityProvider(
         var tools = await mcp.ListToolsAsync(GitLabServer, cancellationToken);
         return ResolveTool(tools.Select(tool => tool.Name), MergeRequestToolCandidates);
     }
+
+    private async Task<string?> ResolveMergeRequestListToolAsync(CancellationToken cancellationToken)
+    {
+        var servers = await mcp.GetServerNamesAsync(cancellationToken);
+        if (!servers.Contains(GitLabServer, StringComparer.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var tools = await mcp.ListToolsAsync(GitLabServer, cancellationToken);
+        return ResolveTool(tools.Select(tool => tool.Name), MergeRequestListToolCandidates);
+    }
+
+    private async Task<GitLabReference?> FindMergeRequestByTaskKeyAsync(
+        string toolName,
+        JsonElement issue,
+        string taskId,
+        CancellationToken cancellationToken)
+    {
+        var repository = FindRepository(issue);
+        if (string.IsNullOrWhiteSpace(repository))
+        {
+            return null;
+        }
+
+        var payload = await mcp.CallToolAsync(
+            GitLabServer,
+            toolName,
+            new Dictionary<string, object?>
+            {
+                ["project_id"] = repository,
+                ["state"] = "all",
+                ["search"] = taskId,
+                ["page"] = 1,
+                ["per_page"] = 20
+            },
+            cancellationToken);
+        var mergeRequests = payload.FindArray("merge_requests", "items", "data");
+        if (mergeRequests is null)
+        {
+            return null;
+        }
+
+        foreach (var item in mergeRequests.Value.EnumerateArray())
+        {
+            var branch = item.FirstProperty("source_branch").StringValue();
+            if (item.FirstProperty("branches") is { ValueKind: JsonValueKind.Object } branches)
+            {
+                branch ??= branches.FirstProperty("source").StringValue();
+            }
+            var title = item.FirstProperty("title").StringValue();
+            if (!(branch?.Contains(taskId, StringComparison.OrdinalIgnoreCase) == true ||
+                  title?.Contains(taskId, StringComparison.OrdinalIgnoreCase) == true))
+            {
+                continue;
+            }
+            var iid = item.FirstProperty("iid").IntValue();
+            if (iid is null)
+            {
+                continue;
+            }
+            return new GitLabReference(
+                repository,
+                branch ?? string.Empty,
+                iid.Value,
+                item.FirstProperty("state").StringValue() ?? "unknown",
+                0,
+                "task-key");
+        }
+        return null;
+    }
+
+    private static string? FindRepository(JsonElement issue)
+    {
+        if (issue.FirstProperty("customFields") is not { ValueKind: JsonValueKind.Object } fields)
+        {
+            return null;
+        }
+
+        foreach (var property in fields.EnumerateObject())
+        {
+            if (!(property.Name.Contains("репозитор", StringComparison.OrdinalIgnoreCase) ||
+                  property.Name.Contains("repository", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+            var value = ReadFieldValue(property.Value);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+            if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            {
+                return uri.AbsolutePath.Trim('/').Replace(".git", string.Empty, StringComparison.OrdinalIgnoreCase);
+            }
+            return value.Trim().Trim('/').Replace(".git", string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        return null;
+    }
+
+    private static string? ReadFieldValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString(),
+        JsonValueKind.Object => value.FirstProperty("name", "value", "fullName", "url").StringValue(),
+        JsonValueKind.Array => value.EnumerateArray().Select(ReadFieldValue)
+            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item)),
+        _ => ((JsonElement?)value).StringValue()
+    };
 
     private static GitLabReference? ParseGitLabReferenceFromText(string text, string source)
     {
@@ -455,13 +792,13 @@ public sealed partial class McpActivityProvider(
 
     private static string? GetTaskId(JsonElement item)
     {
-        var direct = item.FirstProperty("taskId", "issueId", "idReadable").StringValue();
+        var direct = item.FirstProperty("idReadable", "taskId", "issueId", "id").StringValue();
         if (!string.IsNullOrWhiteSpace(direct))
         {
             return direct;
         }
         return item.FirstProperty("issue", "task") is { ValueKind: JsonValueKind.Object } issue
-            ? issue.FirstProperty("id", "idReadable", "issueId").StringValue()
+            ? issue.FirstProperty("idReadable", "issueId", "id").StringValue()
             : null;
     }
 
@@ -537,9 +874,9 @@ public sealed partial class McpActivityProvider(
         return null;
     }
 
-    private static McpIntegrationException MissingWorkItemsTool(IEnumerable<string> names) => new(
-        "YouTrack MCP подключён, но не предоставляет read-only метод чтения списаний " +
-        "youtrack_search_work_items(projectKey, authorLogin, dateFrom, dateTo, offset, limit). " +
+    private static McpIntegrationException MissingSearchIssuesTool(IEnumerable<string> names) => new(
+        "YouTrack MCP подключён, но не предоставляет read-only метод поиска задач " +
+        "youtrack_search_issues(query, customFieldsToReturn, offset, limit). " +
         $"Доступные методы: {string.Join(", ", names.Order())}");
 
     [GeneratedRegex(@"https?://[^/]+/(?<project>[^\s]+?)/-/merge_requests/(?<iid>\d+)", RegexOptions.IgnoreCase)]

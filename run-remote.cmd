@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d "%~dp0"
 
-echo [1/6] Checking required files...
+echo [1/7] Checking required files...
 if not exist ".env.real" (
   echo ERROR: .env.real was not found in %CD%
   exit /b 1
@@ -13,7 +13,7 @@ if not exist "config\mcp.json" (
   exit /b 1
 )
 
-echo [2/6] Checking Docker Desktop...
+echo [2/7] Checking Docker Desktop...
 docker info >nul 2>&1
 if errorlevel 1 (
   echo ERROR: Docker Desktop is not running. Start it, wait for Engine running, and run this file again.
@@ -27,7 +27,7 @@ if /i "%~1"=="--check" (
   exit /b 0
 )
 
-echo [3/6] Stopping old DevScope containers...
+echo [3/7] Stopping old DevScope containers...
 docker compose --env-file .env.real down --remove-orphans
 if errorlevel 1 goto :failed
 
@@ -39,37 +39,53 @@ if not errorlevel 1 (
   if errorlevel 1 goto :failed
 )
 
-echo [4/6] Building and starting PostgreSQL and DevScope...
-docker compose --env-file .env.real up -d --build
+echo [4/7] Building DevScope...
+docker compose --env-file .env.real build devscope
 if errorlevel 1 goto :failed
 
-echo [5/6] Waiting for PostgreSQL and DevScope...
+echo [5/7] Starting PostgreSQL...
+docker compose --env-file .env.real up -d postgres
+if errorlevel 1 goto :failed
+
+echo Waiting up to 120 seconds for PostgreSQL...
 set /a ATTEMPT=0
-:wait_loop
+:wait_postgres
 set /a ATTEMPT+=1
 set "POSTGRES_ID="
-set "DEVSCOPE_ID="
 for /f %%I in ('docker compose --env-file .env.real ps -q postgres') do set "POSTGRES_ID=%%I"
-for /f %%I in ('docker compose --env-file .env.real ps -q devscope') do set "DEVSCOPE_ID=%%I"
 
 set "POSTGRES_HEALTH="
-set "DEVSCOPE_STATUS="
 if defined POSTGRES_ID for /f %%I in ('docker inspect --format "{{.State.Health.Status}}" !POSTGRES_ID! 2^>nul') do set "POSTGRES_HEALTH=%%I"
-if defined DEVSCOPE_ID for /f %%I in ('docker inspect --format "{{.State.Status}}" !DEVSCOPE_ID! 2^>nul') do set "DEVSCOPE_STATUS=%%I"
 
-if /i "!POSTGRES_HEALTH!"=="healthy" if /i "!DEVSCOPE_STATUS!"=="running" goto :verify
+if /i "!POSTGRES_HEALTH!"=="healthy" goto :start_devscope
 if !ATTEMPT! GEQ 60 (
-  echo ERROR: Containers did not become ready in 120 seconds.
+  echo ERROR: PostgreSQL did not become healthy in 120 seconds.
   goto :failed
 )
 timeout /t 2 /nobreak >nul
-goto :wait_loop
+goto :wait_postgres
 
-:verify
-echo [6/6] Checking HTTP endpoints...
-curl.exe --fail --silent --show-error http://127.0.0.1:8080/api/health >nul
+:start_devscope
+echo [6/7] Starting DevScope...
+rem PostgreSQL is already healthy, so Compose does not need to wait on dependencies here.
+docker compose --env-file .env.real up -d --no-deps devscope
 if errorlevel 1 goto :failed
 
+echo Waiting up to 120 seconds for the HTTP API...
+set /a ATTEMPT=0
+:wait_api
+set /a ATTEMPT+=1
+curl.exe --fail --silent http://127.0.0.1:8080/api/health >nul 2>&1
+if not errorlevel 1 goto :verify
+if !ATTEMPT! GEQ 60 (
+  echo ERROR: DevScope HTTP API did not become ready in 120 seconds.
+  goto :failed
+)
+timeout /t 2 /nobreak >nul
+goto :wait_api
+
+:verify
+echo [7/7] Checking the real MCP connections...
 curl.exe --fail --silent --show-error http://127.0.0.1:8080/api/configuration/mcp/tools
 if errorlevel 1 goto :failed
 echo.

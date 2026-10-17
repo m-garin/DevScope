@@ -11,6 +11,8 @@ public sealed class McpGatewayClient(
     IOptions<DevScopeOptions> options,
     ILoggerFactory loggerFactory) : IMcpGatewayClient
 {
+    private const string GatewayProtocolVersion = "2025-06-18";
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
@@ -29,6 +31,7 @@ public sealed class McpGatewayClient(
             await using var transport = CreateTransport(serverName, server);
             await using var client = await McpClient.CreateAsync(
                 transport,
+                CreateClientOptions(),
                 loggerFactory: loggerFactory,
                 cancellationToken: cancellationToken);
             var tools = await client.ListToolsAsync(cancellationToken: cancellationToken);
@@ -63,6 +66,7 @@ public sealed class McpGatewayClient(
             await using var transport = CreateTransport(serverName, server);
             await using var client = await McpClient.CreateAsync(
                 transport,
+                CreateClientOptions(),
                 loggerFactory: loggerFactory,
                 cancellationToken: cancellationToken);
 
@@ -109,6 +113,13 @@ public sealed class McpGatewayClient(
             ConnectionTimeout = TimeSpan.FromSeconds(Math.Clamp(options.Value.McpTimeoutSeconds, 5, 300))
         }, loggerFactory);
     }
+
+    private static McpClientOptions CreateClientOptions() => new()
+    {
+        // The corporate gateways currently implement the initialize-based MCP revision.
+        // Pinning it prevents newer SDKs from probing with server/discover first.
+        ProtocolVersion = GatewayProtocolVersion
+    };
 
     private async Task<OpenCodeMcpServer> GetServerAsync(string serverName, CancellationToken cancellationToken)
     {

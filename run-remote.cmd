@@ -62,7 +62,7 @@ if !ATTEMPT! GEQ 60 (
   echo ERROR: PostgreSQL did not become healthy in 120 seconds.
   goto :failed
 )
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 >nul
 goto :wait_postgres
 
 :start_devscope
@@ -81,14 +81,23 @@ if !ATTEMPT! GEQ 60 (
   echo ERROR: DevScope HTTP API did not become ready in 120 seconds.
   goto :failed
 )
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 >nul
 goto :wait_api
 
 :verify
 echo [7/7] Checking the real MCP connections...
-curl.exe --fail --silent --show-error http://127.0.0.1:8080/api/configuration/mcp/tools
+set "MCP_RESULT=%TEMP%\devscope-mcp-%RANDOM%-%RANDOM%.json"
+curl.exe --fail --silent --show-error http://127.0.0.1:8080/api/configuration/mcp/tools > "!MCP_RESULT!"
 if errorlevel 1 goto :failed
+type "!MCP_RESULT!"
 echo.
+powershell.exe -NoProfile -NonInteractive -Command "$items = Get-Content -Raw -LiteralPath $env:MCP_RESULT | ConvertFrom-Json; if ($items.connected -contains $false) { exit 1 }"
+if errorlevel 1 (
+  echo ERROR: At least one real MCP server is not connected.
+  del /q "!MCP_RESULT!" >nul 2>&1
+  goto :failed
+)
+del /q "!MCP_RESULT!" >nul 2>&1
 
 echo.
 echo SUCCESS: DevScope and PostgreSQL are running.

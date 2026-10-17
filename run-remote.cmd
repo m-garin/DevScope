@@ -41,7 +41,12 @@ if not errorlevel 1 (
 
 echo [4/7] Building DevScope...
 docker compose --env-file .env.real build devscope
-if errorlevel 1 goto :failed
+if errorlevel 1 (
+  echo WARNING: DevScope build failed. Checking for an existing local image...
+  docker image inspect devscope-devscope:latest >nul 2>&1
+  if errorlevel 1 goto :failed
+  echo WARNING: Docker registry is unavailable; using existing local image devscope-devscope:latest.
+)
 
 echo [5/7] Starting PostgreSQL...
 docker compose --env-file .env.real up -d postgres

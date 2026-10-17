@@ -73,8 +73,12 @@ DEVSCOPE_DAILY_REFRESH_HOUR=3
 Дождитесь состояния `Engine running`, затем в корне репозитория выполните:
 
 ```powershell
-docker compose --env-file .env.real up --build -d
+.\run-remote.cmd
 ```
+
+Скрипт проверит конфигурацию, уберёт контейнеры от предыдущих ручных запусков,
+поднимет PostgreSQL и DevScope, дождётся их готовности и проверит HTTP API. Он
+не удаляет PostgreSQL volume и данные базы.
 
 В real-режиме mock-контейнер не запускается.
 

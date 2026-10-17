@@ -17,7 +17,9 @@ RUN dotnet publish src/DevScope.Api/DevScope.Api.csproj -c Release -o /app/publi
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 COPY --from=api-build /app/publish .
+COPY docker-entrypoint.sh /usr/local/bin/devscope-entrypoint
+RUN chmod +x /usr/local/bin/devscope-entrypoint
 RUN mkdir -p /app/config /app/data
 EXPOSE 8080
-ENTRYPOINT ["dotnet", "DevScope.Api.dll"]
+ENTRYPOINT ["/usr/local/bin/devscope-entrypoint"]
 

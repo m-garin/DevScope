@@ -18,6 +18,40 @@
 Список сотрудников в real-режиме загружается из `teamUserGroup` проекта YouTrack.
 Сервисные учётные записи с префиксом `hq-svc-` в список не включаются.
 
+### Корпоративный TLS-сертификат для Docker
+
+OpenCode использует хранилище сертификатов Windows, а Linux-контейнер имеет
+отдельное хранилище. Если в логах DevScope есть `UntrustedRoot`, один раз
+экспортируйте доверенную цепочку корпоративного gateway из Windows:
+
+```powershell
+cd C:\Work\Repositories\DevScope
+.\scripts\Export-CorporateCa.ps1
+```
+
+Скрипт подключается к `ai-gateway-prod.sovcombank.group`, строит цепочку через
+доверенное хранилище Windows и сохраняет только публичные CA-сертификаты в
+`certs\*.crt`. Leaf-сертификат сервера, приватные ключи и MCP-токены не
+экспортируются. Содержимое `certs` исключено из Git.
+
+Compose монтирует каталог `certs` в контейнер, а стартовый скрипт автоматически
+выполняет `update-ca-certificates`. После экспорта пересоздайте приложение:
+
+```powershell
+docker compose --env-file .env.real up -d --build devscope
+```
+
+Проверьте подключение:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8080/api/configuration/mcp/tools
+Invoke-RestMethod http://127.0.0.1:8080/api/employees
+```
+
+Не отключайте TLS validation и не используйте `--insecure`. Если корпоративная
+политика требует официальный CA bundle, положите выданные администраторами PEM
+сертификаты с расширением `.crt` в тот же каталог `certs` вместо экспорта.
+
 В `.env.real` укажите ключ проекта:
 
 ```text

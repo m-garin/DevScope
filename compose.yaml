@@ -16,6 +16,7 @@ services:
       TZ: Europe/Moscow
     volumes:
       - ./config:/app/config:ro
+      - ./certs:/usr/local/share/ca-certificates/devscope:ro
     depends_on:
       postgres:
         condition: service_healthy

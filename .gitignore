@@ -7,6 +7,8 @@ src/DevScope.Api/wwwroot/
 .env
 config/mcp.json
 config/teams.json
+certs/*
+!certs/.gitkeep
 **/*.db
 **/*.db-*
 **/*.tsbuildinfo

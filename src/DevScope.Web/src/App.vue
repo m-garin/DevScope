@@ -4,7 +4,7 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
-import { CalendarDays, ChartNoAxesColumnIncreasing, CheckCircle2, Clock3, Database, ExternalLink, GitMerge, RefreshCw, Save, Search, Settings, Sparkles, UserRound } from '@lucide/vue'
+import { CalendarDays, ChartNoAxesColumnIncreasing, CheckCircle2, ChevronDown, Clock3, Database, ExternalLink, GitMerge, Info, RefreshCw, Save, Search, Settings, Sparkles, UserRound } from '@lucide/vue'
 import { api } from './services/api'
 import type { ApplicationSettings, CacheRefreshInterval, Employee, LlmModelOption, PeriodSummary, TaskActivity, TaskAnalysis } from './types'
 
@@ -31,6 +31,9 @@ const settingsBusy = ref(false)
 const cacheRefreshBusy = ref(false)
 const settingsMessage = ref('')
 const settingsError = ref('')
+const timelineSource = ref<'All' | 'YouTrack' | 'GitLab'>('All')
+const expandedTimelineEvents = ref<Record<string, boolean>>({})
+const showAllTimelineEvents = ref(false)
 
 const refreshIntervalOptions = [
   { label: 'Раз в час', value: 'Hourly' as CacheRefreshInterval },
@@ -38,6 +41,7 @@ const refreshIntervalOptions = [
 ]
 
 const employeeOptions = computed(() => employees.value.map(item => ({ label: item.displayName, value: item.id })))
+const selectedEmployeeDetails = computed(() => employees.value.find(item => item.id === selectedEmployee.value))
 const totalHours = computed(() => summary.value ? formatDuration(summary.value.loggedMinutes) : '0 ч')
 const activeDays = computed(() => new Set(summary.value?.tasks.flatMap(task => task.worklogs.map(item => item.date)) ?? []).size)
 const worklogPresenceCount = computed(() => summary.value?.tasks.reduce((sum, task) => sum + task.worklogs.length, 0) ?? 0)
@@ -46,6 +50,18 @@ const reviewHours = computed(() => {
     .filter(worklog => worklog.type.toLocaleLowerCase().includes('ревью'))
     .reduce((sum, worklog) => sum + worklog.durationMinutes, 0) ?? 0
   return formatDuration(minutes)
+})
+const filteredTimelineEvents = computed(() => {
+  const events = summary.value?.events ?? []
+  return timelineSource.value === 'All' ? events : events.filter(event => event.source === timelineSource.value)
+})
+const visibleTimelineEvents = computed(() => showAllTimelineEvents.value
+  ? filteredTimelineEvents.value
+  : filteredTimelineEvents.value.slice(0, 14))
+const hiddenTimelineEventCount = computed(() => Math.max(0, filteredTimelineEvents.value.length - visibleTimelineEvents.value.length))
+const periodLabel = computed(() => {
+  if (dates.value.length < 2 || !dates.value[1]) return ''
+  return `${formatDateOnly(toIsoDate(dates.value[0]))} — ${formatDateOnly(toIsoDate(dates.value[1]))}`
 })
 
 function toIsoDate(value: Date) {
@@ -59,6 +75,59 @@ function formatDuration(minutes: number) {
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
   return rest ? `${hours} ч ${rest} мин` : `${hours} ч`
+}
+
+function formatDateOnly(value: string) {
+  const [year, month, day] = value.split('-')
+  return `${day}.${month}.${year}`
+}
+
+function pluralizeCommits(count: number) {
+  const mod100 = count % 100
+  const mod10 = count % 10
+  if (mod100 >= 11 && mod100 <= 14) return `${count} коммитов`
+  if (mod10 === 1) return `${count} коммит`
+  if (mod10 >= 2 && mod10 <= 4) return `${count} коммита`
+  return `${count} коммитов`
+}
+
+function formatMergeRequestState(state: string) {
+  const labels: Record<string, string> = {
+    open: 'Открыт', opened: 'Открыт', merged: 'Слит', closed: 'Закрыт', locked: 'Заблокирован'
+  }
+  return labels[state.toLocaleLowerCase()] ?? 'Статус не получен'
+}
+
+function cleanEventDetails(value?: string) {
+  if (!value) return ''
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/<\/?(?:ul|ol|li|p|br)[^>]*>/gi, match => /<\/(?:li|p)>|<br/i.test(match) ? '\n' : '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function formatEventTime(occurredAt: string, kind: string) {
+  const value = new Date(occurredAt)
+  if (kind === 'Worklog' || kind === 'WorklogPresence') {
+    return value.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })
+  }
+  return value.toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+
+function timelineDetailsAreLong(value?: string) {
+  return cleanEventDetails(value).length > 180 || cleanEventDetails(value).split('\n').length > 3
+}
+
+function toggleTimelineEvent(eventId: string) {
+  expandedTimelineEvents.value = {
+    ...expandedTimelineEvents.value,
+    [eventId]: !expandedTimelineEvents.value[eventId]
+  }
 }
 
 function isReview(task: TaskActivity) {
@@ -80,6 +149,9 @@ async function load() {
   if (!selectedEmployee.value || dates.value.length < 2 || !dates.value[1]) return
   loading.value = true
   error.value = ''
+  timelineSource.value = 'All'
+  expandedTimelineEvents.value = {}
+  showAllTimelineEvents.value = false
   try {
     summary.value = await api.activity(selectedEmployee.value, toIsoDate(dates.value[0]), toIsoDate(dates.value[1]))
   } catch (exception) {
@@ -207,7 +279,7 @@ watch(selectedModel, value => {
 
       <template v-else-if="summary">
         <section class="summary card">
-          <div class="summary-copy"><span class="round-icon"><Search :size="21" /></span><div><h2>Кратко за период</h2><p>{{ summary.narrative }}</p><small v-if="summary.dataUpdatedAt">Данные обновлены {{ new Date(summary.dataUpdatedAt).toLocaleString('ru-RU') }}</small></div></div>
+          <div class="summary-copy"><span class="round-icon"><Search :size="21" /></span><div><div class="summary-person"><h2>{{ selectedEmployeeDetails?.displayName }}</h2><span>{{ periodLabel }}</span></div><p>{{ summary.narrative }}</p><small v-if="summary.dataUpdatedAt">Данные обновлены {{ new Date(summary.dataUpdatedAt).toLocaleString('ru-RU') }}</small></div></div>
           <div v-if="summary.hasExactWorklogDurations" class="metric"><span>Списано по worklog</span><strong>{{ totalHours }}</strong></div>
           <div v-else class="metric"><span>Дней со списаниями</span><strong>{{ activeDays }}</strong></div>
           <div v-if="summary.hasExactWorklogDurations" class="metric"><span>На Code Review</span><strong>{{ reviewHours }}</strong></div>
@@ -216,25 +288,39 @@ watch(selectedModel, value => {
           <div class="metric"><span>Связанных MR</span><strong>{{ summary.mergeRequestCount }}</strong></div>
         </section>
 
+        <div v-if="!summary.hasExactWorklogDurations" class="source-notice">
+          <Info :size="19" />
+          <div>
+            <strong>MCP подтверждает дни списаний, но не возвращает их длительность</strong>
+            <span>Показываем только подтверждённые факты: сотрудник был автором worklog в указанный день. Часы не рассчитываются из полей задачи или активности GitLab.</span>
+          </div>
+        </div>
+
         <div class="columns">
           <section class="card tasks">
-            <div class="section-title"><div><span class="yt">YT</span><h2>Задачи по списаниям</h2></div><small>Выбраны по автору worklog, а не по исполнителю</small></div>
+            <div class="section-title"><div><span class="yt">YT</span><div><h2>Задачи по списаниям</h2><small>Отбор по автору worklog · исполнитель задачи не учитывается</small></div></div></div>
             <article v-for="item in summary.tasks" :key="item.task.id" class="task-card" :class="{ review: isReview(item) }">
               <div class="task-head">
-                <div><h3><a :href="item.task.url">{{ item.task.id }}</a> · {{ item.task.summary }}</h3><span v-if="!item.isOwnTask" class="foreign">Чужая задача</span></div>
+                <div class="task-title"><h3 :title="item.task.summary"><a :href="item.task.url" target="_blank" rel="noopener noreferrer">{{ item.task.id }}</a> · {{ item.task.summary }}</h3><span v-if="!item.isOwnTask" class="foreign">Сотрудник не указан исполнителем</span></div>
                 <span class="status">{{ item.task.status }}</span>
               </div>
-              <div class="worklog-total"><Clock3 :size="18" /><strong>{{ summary.hasExactWorklogDurations ? formatDuration(item.loggedMinutes) : `${item.worklogs.length} дн.` }}</strong><span>{{ summary.hasExactWorklogDurations ? 'списал выбранный сотрудник' : 'подтверждены списания сотрудника' }}</span></div>
+              <div class="worklog-total"><Clock3 :size="18" /><strong>{{ summary.hasExactWorklogDurations ? formatDuration(item.loggedMinutes) : item.worklogs.length }}</strong><span>{{ summary.hasExactWorklogDurations ? 'списал выбранный сотрудник' : 'дн. с подтверждёнными списаниями' }}</span></div>
               <div class="worklogs">
-                <div v-for="worklog in item.worklogs" :key="worklog.id">
-                  <span>{{ new Date(worklog.date).toLocaleDateString('ru-RU') }}</span><strong>{{ worklog.type }}</strong><span>{{ summary.hasExactWorklogDurations ? formatDuration(worklog.durationMinutes) : 'есть' }}</span><em>{{ worklog.description }}</em>
+                <div class="worklog-header" :class="{ presence: !summary.hasExactWorklogDurations }">
+                  <span>Дата</span><span v-if="summary.hasExactWorklogDurations">Тип</span><span v-if="summary.hasExactWorklogDurations">Время</span><span>Подтверждение</span><span></span>
+                </div>
+                <div v-for="worklog in item.worklogs" :key="worklog.id" :class="{ presence: !summary.hasExactWorklogDurations }">
+                  <span>{{ formatDateOnly(worklog.date) }}</span><strong v-if="summary.hasExactWorklogDurations">{{ worklog.type }}</strong><span v-if="summary.hasExactWorklogDurations">{{ formatDuration(worklog.durationMinutes) }}</span><em>{{ summary.hasExactWorklogDurations ? worklog.description : 'Автор и дата подтверждены YouTrack' }}</em>
                   <a v-if="worklog.url" class="row-link" :href="worklog.url" target="_blank" rel="noopener noreferrer" title="Открыть это списание в YouTrack"><ExternalLink :size="14" /><span>Открыть</span></a>
                 </div>
               </div>
               <div v-if="item.task.gitLab" class="gitlab-row">
-                <GitMerge :size="17" /><strong>GitLab</strong><span>{{ item.task.gitLab.branch }}</span><span>{{ item.task.gitLab.commitCount }} коммитов</span>
-                <a v-if="item.task.gitLab.url" class="mr-link" :href="item.task.gitLab.url" target="_blank" rel="noopener noreferrer">MR !{{ item.task.gitLab.mergeRequestIid }} · {{ item.task.gitLab.mergeRequestState }}<ExternalLink :size="14" /></a>
-                <span v-else>MR !{{ item.task.gitLab.mergeRequestIid }} · {{ item.task.gitLab.mergeRequestState }}</span>
+                <GitMerge :size="17" /><strong>GitLab</strong><span v-if="item.task.gitLab.branch" class="branch">{{ item.task.gitLab.branch }}</span><span>{{ pluralizeCommits(item.task.gitLab.commitCount) }}</span>
+                <span class="mr-state">MR !{{ item.task.gitLab.mergeRequestIid }} · {{ formatMergeRequestState(item.task.gitLab.mergeRequestState) }}</span>
+                <span v-if="item.task.gitLab.employeeApproved" class="gitlab-signal approved"><CheckCircle2 :size="14" />Аппрув сотрудника</span>
+                <span v-if="item.task.gitLab.employeeCommentCount" class="gitlab-signal">Комментариев сотрудника: {{ item.task.gitLab.employeeCommentCount }}</span>
+                <a v-if="item.task.gitLab.url" class="mr-link" :href="item.task.gitLab.url" target="_blank" rel="noopener noreferrer">Открыть MR !{{ item.task.gitLab.mergeRequestIid }}<ExternalLink :size="14" /></a>
+                <span v-else class="mr-unavailable">Ссылка на MR не получена от MCP</span>
               </div>
               <div class="analysis-action">
                 <Button
@@ -246,9 +332,9 @@ watch(selectedModel, value => {
                   @click="analyzeTask(item.task.id)"
                 >
                   <Sparkles :size="16" />
-                  <span>{{ taskAnalyses[item.task.id] ? 'Обновить объяснение' : 'Объяснить задачу' }}</span>
+                  <span>{{ taskAnalyses[item.task.id] ? 'Обновить резюме' : 'Сформировать резюме' }}</span>
                 </Button>
-                <small>LLM вызывается только по нажатию</small>
+                <small>ИИ запускается только для этой задачи</small>
               </div>
               <div v-if="taskAnalysisErrors[item.task.id]" class="analysis-error">{{ taskAnalysisErrors[item.task.id] }}</div>
               <section v-if="taskAnalyses[item.task.id]" class="task-analysis">
@@ -267,19 +353,29 @@ watch(selectedModel, value => {
           </section>
 
           <section class="card timeline">
-            <div class="section-title"><div><span class="round-icon"><CalendarDays :size="20" /></span><h2>Хронология</h2></div></div>
-            <div v-for="event in summary.events" :key="event.id" class="timeline-item">
+            <div class="section-title timeline-title"><div><span class="round-icon"><CalendarDays :size="20" /></span><div><h2>Хронология</h2><small>{{ filteredTimelineEvents.length }} событий</small></div></div></div>
+            <div class="timeline-filters" role="group" aria-label="Источник событий">
+              <button v-for="source in (['All', 'YouTrack', 'GitLab'] as const)" :key="source" :class="{ active: timelineSource === source }" @click="timelineSource = source; showAllTimelineEvents = false">
+                {{ source === 'All' ? 'Все' : source }}
+              </button>
+            </div>
+            <div v-if="visibleTimelineEvents.length === 0" class="timeline-empty">Нет событий выбранного источника.</div>
+            <div v-for="event in visibleTimelineEvents" :key="event.id" class="timeline-item">
               <span class="dot" :class="event.source.toLowerCase()"></span>
-              <time>{{ new Date(event.occurredAt).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) }}</time>
+              <time>{{ formatEventTime(event.occurredAt, event.kind) }}</time>
               <div class="timeline-content">
                 <div class="timeline-heading">
                   <span class="source" :class="event.source.toLowerCase()">{{ event.source }}</span>
                   <a v-if="event.url" :href="event.url" target="_blank" rel="noopener noreferrer"><strong>{{ event.title }}</strong><ExternalLink :size="13" /></a>
                   <strong v-else>{{ event.title }}</strong>
                 </div>
-                <p v-if="event.details">{{ event.details }}</p>
+                <p v-if="event.details" :class="{ clamped: timelineDetailsAreLong(event.details) && !expandedTimelineEvents[event.id] }">{{ cleanEventDetails(event.details) }}</p>
+                <button v-if="timelineDetailsAreLong(event.details)" class="details-toggle" @click="toggleTimelineEvent(event.id)">
+                  {{ expandedTimelineEvents[event.id] ? 'Свернуть' : 'Подробнее' }}<ChevronDown :size="14" :class="{ rotated: expandedTimelineEvents[event.id] }" />
+                </button>
               </div>
             </div>
+            <button v-if="hiddenTimelineEventCount" class="show-more" @click="showAllTimelineEvents = true">Показать ещё {{ hiddenTimelineEventCount }}</button>
             <div class="verified"><CheckCircle2 :size="18" /><span>Worklog и GitLab отображаются раздельно. GitLab-события не пересчитываются в часы.</span></div>
           </section>
         </div>

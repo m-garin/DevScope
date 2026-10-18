@@ -7,6 +7,7 @@ public sealed class DevScopeOptions
     public string McpConfigPath { get; set; } = "config/mcp.json";
     public string TeamsConfigPath { get; set; } = "config/teams.json";
     public string ProjectKey { get; set; } = "FINTDR";
+    public string DeveloperGroup { get; set; } = "Fintender-Backend";
     public int McpTimeoutSeconds { get; set; } = 120;
     public int DailyRefreshHour { get; set; } = 3;
 }

@@ -8,4 +8,6 @@ public sealed record GitLabReference(
     int CommitCount,
     string LinkSource,
     int DiscussionCount = 0,
-    string? Url = null);
+    string? Url = null,
+    bool EmployeeApproved = false,
+    int EmployeeCommentCount = 0);

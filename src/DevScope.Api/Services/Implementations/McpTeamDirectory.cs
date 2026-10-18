@@ -34,23 +34,13 @@ public sealed class McpTeamDirectory(
 
             var tools = await mcp.ListToolsAsync(Server, cancellationToken);
             var names = tools.Select(item => item.Name).ToArray();
-            var projectTool = ResolveTool(names, "youtrack_get_project", "get_project")
-                ?? throw MissingTool("youtrack_get_project", names);
             var membersTool = ResolveTool(names, "youtrack_get_user_group_members", "get_user_group_members")
                 ?? throw MissingTool("youtrack_get_user_group_members", names);
-
-            var project = await mcp.CallToolAsync(
-                Server,
-                projectTool,
-                new Dictionary<string, object?> { ["projectKey"] = options.Value.ProjectKey },
-                cancellationToken);
-            var group = project.FirstProperty("teamUserGroup") is { ValueKind: System.Text.Json.JsonValueKind.Object } team
-                ? team.FirstProperty("name").StringValue()
-                : null;
+            var group = options.Value.DeveloperGroup.Trim();
             if (string.IsNullOrWhiteSpace(group))
             {
                 throw new McpIntegrationException(
-                    $"Проект '{options.Value.ProjectKey}' не вернул teamUserGroup.name.");
+                    "Не задана группа разработчиков DevScope:DeveloperGroup.");
             }
 
             var employees = new Dictionary<string, Employee>(StringComparer.OrdinalIgnoreCase);
@@ -74,7 +64,7 @@ public sealed class McpTeamDirectory(
                 {
                     count++;
                     var login = member.FirstProperty("login", "username").StringValue();
-                    if (string.IsNullOrWhiteSpace(login) || IsServiceAccount(login))
+                    if (string.IsNullOrWhiteSpace(login) || IsServiceAccount(login) || IsInactive(member))
                     {
                         continue;
                     }
@@ -103,6 +93,10 @@ public sealed class McpTeamDirectory(
 
     private static bool IsServiceAccount(string login) =>
         login.StartsWith("hq-svc-", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsInactive(System.Text.Json.JsonElement member) =>
+        member.FirstProperty("banned", "isBanned", "disabled", "isDisabled") is
+            { ValueKind: System.Text.Json.JsonValueKind.True };
 
     private static string? ResolveTool(IEnumerable<string> names, params string[] candidates) =>
         candidates.Select(candidate => names.FirstOrDefault(name =>

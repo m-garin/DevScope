@@ -162,8 +162,8 @@ public sealed partial class McpActivityProvider(
                         ["include_discussions"] = true
                     },
                     cancellationToken);
-                task = task with { GitLab = EnrichGitLabReference(task.GitLab, details) };
-                gitLabEvents.AddRange(ParseGitLabEvents(details, task.Id, employee.Id, task.GitLab));
+                task = task with { GitLab = EnrichGitLabReference(task.GitLab, details, employee) };
+                gitLabEvents.AddRange(ParseGitLabEvents(details, task.Id, employee, task.GitLab));
             }
 
             task ??= new WorkTask(taskId, taskId, "Неизвестно", null, null, string.Empty, null);
@@ -300,8 +300,8 @@ public sealed partial class McpActivityProvider(
                         ["include_discussions"] = true
                     },
                     cancellationToken);
-                task = task with { GitLab = EnrichGitLabReference(task.GitLab, details) };
-                events.AddRange(ParseGitLabEvents(details, task.Id, employee.Id, task.GitLab));
+                task = task with { GitLab = EnrichGitLabReference(task.GitLab, details, employee) };
+                events.AddRange(ParseGitLabEvents(details, task.Id, employee, task.GitLab));
             }
 
             task ??= new WorkTask(taskId, taskId, "Неизвестно", null, null, string.Empty, null);
@@ -727,24 +727,32 @@ public sealed partial class McpActivityProvider(
             : null;
     }
 
-    private static GitLabReference EnrichGitLabReference(GitLabReference reference, JsonElement details)
+    private static GitLabReference EnrichGitLabReference(
+        GitLabReference reference,
+        JsonElement details,
+        Employee employee)
     {
         var commits = details.FindArray("commits");
         var discussions = details.FindArray("discussions");
+        var employeeNotes = EnumerateDiscussionNotes(details)
+            .Where(note => IsEmployeeGitLabAuthor(note, employee))
+            .ToArray();
         return reference with
         {
             Branch = details.FirstProperty("source_branch", "branch").StringValue() ?? reference.Branch,
             MergeRequestState = details.FirstProperty("state", "merge_status").StringValue() ?? reference.MergeRequestState,
             CommitCount = commits?.GetArrayLength() ?? details.FirstProperty("commitCount", "commits_count").IntValue() ?? reference.CommitCount,
             DiscussionCount = discussions?.GetArrayLength() ?? reference.DiscussionCount,
-            Url = details.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url
+            Url = details.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url,
+            EmployeeApproved = IsEmployeeListedAsApprover(details, employee) || employeeNotes.Any(IsApprovalNote),
+            EmployeeCommentCount = employeeNotes.Count(note => !IsApprovalNote(note) && !IsSystemNote(note))
         };
     }
 
     private static IEnumerable<ActivityEvent> ParseGitLabEvents(
         JsonElement details,
         string taskId,
-        string employeeId,
+        Employee employee,
         GitLabReference reference)
     {
         if (details.FindArray("commits") is { } commits)
@@ -760,7 +768,7 @@ public sealed partial class McpActivityProvider(
                 yield return new ActivityEvent(
                     $"gitlab:commit:{id}",
                     taskId,
-                    employeeId,
+                    employee.Id,
                     occurredAt.Value,
                     "GitLab",
                     "Commit",
@@ -788,19 +796,83 @@ public sealed partial class McpActivityProvider(
                     continue;
                 }
                 var id = note.FirstProperty("id").StringValue() ?? Guid.NewGuid().ToString("N");
+                var isEmployeeAction = IsEmployeeGitLabAuthor(note, employee);
+                var isApproval = isEmployeeAction && IsApprovalNote(note);
+                var isComment = isEmployeeAction && !isApproval && !IsSystemNote(note);
                 yield return new ActivityEvent(
                     $"gitlab:discussion:{id}",
                     taskId,
-                    employeeId,
+                    employee.Id,
                     occurredAt.Value,
                     "GitLab",
-                    "Discussion",
-                    $"Обсуждение MR !{reference.MergeRequestIid}",
-                    note.FirstProperty("body", "text").StringValue(),
+                    isApproval ? "Approval" : isComment ? "ReviewComment" : "Discussion",
+                    isApproval
+                        ? $"Сотрудник одобрил MR !{reference.MergeRequestIid}"
+                        : isComment
+                            ? $"Сотрудник оставил комментарий в MR !{reference.MergeRequestIid}"
+                            : $"Обсуждение MR !{reference.MergeRequestIid}",
+                    isApproval ? null : note.FirstProperty("body", "text").StringValue(),
                     note.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url);
             }
         }
     }
+
+    private static IEnumerable<JsonElement> EnumerateDiscussionNotes(JsonElement details)
+    {
+        if (details.FindArray("discussions") is not { } discussions)
+        {
+            yield break;
+        }
+        foreach (var discussion in discussions.EnumerateArray())
+        {
+            if (discussion.FindArray("notes") is not { } notes)
+            {
+                continue;
+            }
+            foreach (var note in notes.EnumerateArray())
+            {
+                yield return note;
+            }
+        }
+    }
+
+    private static bool IsEmployeeGitLabAuthor(JsonElement item, Employee employee)
+    {
+        if (string.IsNullOrWhiteSpace(employee.GitLabUsername) ||
+            item.FirstProperty("author", "user") is not { ValueKind: JsonValueKind.Object } author)
+        {
+            return false;
+        }
+        var username = author.FirstProperty("username", "user_name", "login").StringValue();
+        return !string.IsNullOrWhiteSpace(username) &&
+               username.Equals(employee.GitLabUsername, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsEmployeeListedAsApprover(JsonElement details, Employee employee)
+    {
+        if (string.IsNullOrWhiteSpace(employee.GitLabUsername) ||
+            details.FindArray("approved_by", "approvedBy", "approvers") is not { } approvers)
+        {
+            return false;
+        }
+        return approvers.EnumerateArray().Any(item =>
+        {
+            var user = item.FirstProperty("user") is { ValueKind: JsonValueKind.Object } nested ? nested : item;
+            var username = user.FirstProperty("username", "user_name", "login").StringValue();
+            return !string.IsNullOrWhiteSpace(username) &&
+                   username.Equals(employee.GitLabUsername, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    private static bool IsApprovalNote(JsonElement note)
+    {
+        var body = note.FirstProperty("body", "text").StringValue();
+        return body?.Contains("approved this merge request", StringComparison.OrdinalIgnoreCase) == true ||
+               body?.Equals("approved", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static bool IsSystemNote(JsonElement note) =>
+        note.FirstProperty("system") is { ValueKind: JsonValueKind.True };
 
     private static string? BuildWorkItemUrl(string taskUrl, string workItemId)
     {

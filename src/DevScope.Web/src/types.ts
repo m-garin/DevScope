@@ -25,6 +25,8 @@ export interface GitLabReference {
   linkSource: string
   discussionCount?: number
   url?: string
+  employeeApproved?: boolean
+  employeeCommentCount?: number
 }
 
 export interface TaskActivity {

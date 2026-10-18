@@ -15,8 +15,10 @@
 Файл исключён из Git. DevScope ничего не копирует из OpenCode и не выводит
 заголовки или токены в API.
 
-Список сотрудников в real-режиме загружается из `teamUserGroup` проекта YouTrack.
-Сервисные учётные записи с префиксом `hq-svc-` в список не включаются.
+Список сотрудников в real-режиме загружается непосредственно из группы YouTrack
+`Fintender-Backend`. Сервисные учётные записи с префиксом `hq-svc-`, а также
+заблокированные и отключённые пользователи в список не включаются. Другие группы
+можно указать через `DEVSCOPE_DEVELOPER_GROUP`.
 
 ### Корпоративный TLS-сертификат для Docker
 
@@ -56,6 +58,7 @@ Invoke-RestMethod http://127.0.0.1:8080/api/employees
 
 ```text
 DEVSCOPE_PROJECT_KEY=FINTDR
+DEVSCOPE_DEVELOPER_GROUP=Fintender-Backend
 ```
 
 PostgreSQL поднимается тем же compose-файлом. При необходимости измените локальные
@@ -158,7 +161,6 @@ http://127.0.0.1:8080/api/configuration/mcp/tools
 Для списка сотрудников используются:
 
 ```text
-youtrack_get_project(projectKey)
 youtrack_get_user_group_members(group, offset, limit)
 ```
 

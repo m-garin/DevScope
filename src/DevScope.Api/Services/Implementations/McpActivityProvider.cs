@@ -560,7 +560,29 @@ public sealed partial class McpActivityProvider(
             url,
             ParseGitLabReference(issue),
             parent,
-            issue.FirstProperty("type").StringValue() ?? Field("Type", "Тип1", "$Тип"));
+            issue.FirstProperty("type").StringValue() ?? Field("Type", "Тип1", "$Тип"),
+            HasTag(issue, "SODA"));
+    }
+
+    private static bool HasTag(JsonElement issue, string expectedTag)
+    {
+        if (issue.FirstProperty("tags") is not { ValueKind: JsonValueKind.Array } tags)
+        {
+            return false;
+        }
+
+        foreach (var tag in tags.EnumerateArray())
+        {
+            var name = tag.ValueKind == JsonValueKind.Object
+                ? tag.FirstProperty("name", "value").StringValue()
+                : tag.ValueKind == JsonValueKind.String ? tag.GetString() : null;
+            if (string.Equals(name, expectedTag, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static GitLabReference? ParseGitLabReference(JsonElement issue)
@@ -732,21 +754,61 @@ public sealed partial class McpActivityProvider(
         JsonElement details,
         Employee employee)
     {
-        var commits = details.FindArray("commits");
-        var discussions = details.FindArray("discussions");
+        var mergeRequest = FindMergeRequestDetails(details);
+        var commits = details.FindArray("commits") ?? mergeRequest.FindArray("commits");
+        var discussions = details.FindArray("discussions") ?? mergeRequest.FindArray("discussions");
         var employeeNotes = EnumerateDiscussionNotes(details)
             .Where(note => IsEmployeeGitLabAuthor(note, employee))
             .ToArray();
         return reference with
         {
-            Branch = details.FirstProperty("source_branch", "branch").StringValue() ?? reference.Branch,
-            MergeRequestState = details.FirstProperty("state", "merge_status").StringValue() ?? reference.MergeRequestState,
-            CommitCount = commits?.GetArrayLength() ?? details.FirstProperty("commitCount", "commits_count").IntValue() ?? reference.CommitCount,
+            Branch = mergeRequest.FirstProperty("source_branch", "branch").StringValue() ?? reference.Branch,
+            MergeRequestState = ResolveMergeRequestState(mergeRequest, reference.MergeRequestState),
+            CommitCount = commits?.GetArrayLength() ?? mergeRequest.FirstProperty("commitCount", "commits_count").IntValue() ?? reference.CommitCount,
             DiscussionCount = discussions?.GetArrayLength() ?? reference.DiscussionCount,
-            Url = details.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url,
+            Url = mergeRequest.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url,
             EmployeeApproved = IsEmployeeListedAsApprover(details, employee) || employeeNotes.Any(IsApprovalNote),
             EmployeeCommentCount = employeeNotes.Count(note => !IsApprovalNote(note) && !IsSystemNote(note))
         };
+    }
+
+    private static JsonElement FindMergeRequestDetails(JsonElement details)
+    {
+        foreach (var name in new[] { "merge_request", "mergeRequest", "data", "result" })
+        {
+            if (details.FirstProperty(name) is { ValueKind: JsonValueKind.Object } nested &&
+                nested.FirstProperty("state", "iid", "merge_commit_sha", "merged_at") is not null)
+            {
+                return nested;
+            }
+        }
+
+        return details;
+    }
+
+    private static string ResolveMergeRequestState(JsonElement details, string fallback)
+    {
+        var state = details.FirstProperty("state").StringValue()?.Trim().ToLowerInvariant();
+        if (state is "open")
+        {
+            return "opened";
+        }
+        if (state is "opened" or "merged" or "closed" or "locked")
+        {
+            return state;
+        }
+
+        if (!string.IsNullOrWhiteSpace(details.FirstProperty("merged_at", "mergedAt").StringValue()) ||
+            !string.IsNullOrWhiteSpace(details.FirstProperty("merge_commit_sha", "mergeCommitSha").StringValue()))
+        {
+            return "merged";
+        }
+        if (!string.IsNullOrWhiteSpace(details.FirstProperty("closed_at", "closedAt").StringValue()))
+        {
+            return "closed";
+        }
+
+        return fallback;
     }
 
     private static IEnumerable<ActivityEvent> ParseGitLabEvents(

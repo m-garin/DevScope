@@ -95,7 +95,7 @@ function formatMergeRequestState(state: string) {
   const labels: Record<string, string> = {
     open: 'Открыт', opened: 'Открыт', merged: 'Слит', closed: 'Закрыт', locked: 'Заблокирован'
   }
-  return labels[state.toLocaleLowerCase()] ?? 'Статус не получен'
+  return labels[state.trim().toLocaleLowerCase()] ?? ''
 }
 
 function cleanEventDetails(value?: string) {
@@ -301,7 +301,13 @@ watch(selectedModel, value => {
             <div class="section-title"><div><span class="yt">YT</span><div><h2>Задачи по списаниям</h2><small>Отбор по автору worklog · исполнитель задачи не учитывается</small></div></div></div>
             <article v-for="item in summary.tasks" :key="item.task.id" class="task-card" :class="{ review: isReview(item) }">
               <div class="task-head">
-                <div class="task-title"><h3 :title="item.task.summary"><a :href="item.task.url" target="_blank" rel="noopener noreferrer">{{ item.task.id }}</a> · {{ item.task.summary }}</h3><span v-if="!item.isOwnTask" class="foreign">Сотрудник не указан исполнителем</span></div>
+                <div class="task-title">
+                  <h3 :title="item.task.summary"><a :href="item.task.url" target="_blank" rel="noopener noreferrer">{{ item.task.id }}</a> · {{ item.task.summary }}</h3>
+                  <div class="task-signals">
+                    <span v-if="item.task.digitalTwinStarted" class="digital-twin" title="В задаче есть тег SODA в YouTrack">Цифровой Двойник</span>
+                    <span v-if="!item.isOwnTask" class="foreign">Сотрудник не указан исполнителем</span>
+                  </div>
+                </div>
                 <span class="status">{{ item.task.status }}</span>
               </div>
               <div class="worklog-total"><Clock3 :size="18" /><strong>{{ summary.hasExactWorklogDurations ? formatDuration(item.loggedMinutes) : item.worklogs.length }}</strong><span>{{ summary.hasExactWorklogDurations ? 'списал выбранный сотрудник' : 'дн. с подтверждёнными списаниями' }}</span></div>
@@ -316,7 +322,7 @@ watch(selectedModel, value => {
               </div>
               <div v-if="item.task.gitLab" class="gitlab-row">
                 <GitMerge :size="17" /><strong>GitLab</strong><span v-if="item.task.gitLab.branch" class="branch">{{ item.task.gitLab.branch }}</span><span>{{ pluralizeCommits(item.task.gitLab.commitCount) }}</span>
-                <span class="mr-state">MR !{{ item.task.gitLab.mergeRequestIid }} · {{ formatMergeRequestState(item.task.gitLab.mergeRequestState) }}</span>
+                <span class="mr-state">MR !{{ item.task.gitLab.mergeRequestIid }}<template v-if="formatMergeRequestState(item.task.gitLab.mergeRequestState)"> · {{ formatMergeRequestState(item.task.gitLab.mergeRequestState) }}</template></span>
                 <span v-if="item.task.gitLab.employeeApproved" class="gitlab-signal approved"><CheckCircle2 :size="14" />Аппрув сотрудника</span>
                 <span v-if="item.task.gitLab.employeeCommentCount" class="gitlab-signal">Комментариев сотрудника: {{ item.task.gitLab.employeeCommentCount }}</span>
                 <a v-if="item.task.gitLab.url" class="mr-link" :href="item.task.gitLab.url" target="_blank" rel="noopener noreferrer">Открыть MR !{{ item.task.gitLab.mergeRequestIid }}<ExternalLink :size="14" /></a>

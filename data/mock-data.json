@@ -27,6 +27,8 @@
       "url": "https://youtrack.example/issue/FINTDR-50102",
       "parentSummary": "Платформа API",
       "type": "Техническая задача",
+      "digitalTwinStarted": true,
+      "tags": ["SODA"],
       "gitLab": {
         "projectPath": "fintender/example-backend",
         "branch": "feature/FINTDR-50102",

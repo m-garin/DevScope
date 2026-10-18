@@ -52,9 +52,11 @@ h2 { margin: 0; font-size: 19px; }
 .task-title { min-width: 0; }
 .task-head h3 { display: -webkit-box; margin: 0; overflow: hidden; font-size: 16px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .task-head h3 a { color: #1468d4; }
-.status, .foreign { display: inline-block; border-radius: 20px; padding: 5px 10px; color: #1269d7; background: #e9f2ff; font-size: 12px; font-weight: 650; }
+.status, .foreign, .digital-twin { display: inline-block; border-radius: 20px; padding: 5px 10px; color: #1269d7; background: #e9f2ff; font-size: 12px; font-weight: 650; }
 .status { flex: 0 0 auto; max-width: 190px; text-align: center; }
-.foreign { margin-top: 8px; color: #6f43b5; background: #f0eafd; }
+.task-signals { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+.foreign { color: #6f43b5; background: #f0eafd; }
+.digital-twin { color: #247344; background: #e4f4e9; }
 .worklog-total { display: flex; align-items: center; gap: 8px; margin: 17px 0 10px; color: #526078; }
 .worklog-total strong { color: #1a2639; font-size: 18px; }
 .worklog-total span { font-size: 12px; }

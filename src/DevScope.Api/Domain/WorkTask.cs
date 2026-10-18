@@ -9,4 +9,5 @@ public sealed record WorkTask(
     string Url,
     GitLabReference? GitLab,
     string? ParentSummary = null,
-    string? Type = null);
+    string? Type = null,
+    bool DigitalTwinStarted = false);

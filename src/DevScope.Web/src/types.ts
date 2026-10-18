@@ -38,6 +38,7 @@ export interface TaskActivity {
     estimateMinutes?: number
     url: string
     gitLab?: GitLabReference
+    digitalTwinStarted: boolean
   }
   loggedMinutes: number
   worklogs: Worklog[]

@@ -69,7 +69,8 @@ public sealed class McpTeamDirectory(
                         continue;
                     }
                     var name = member.FirstProperty("name", "displayName", "fullName").StringValue() ?? login;
-                    employees[login] = new Employee(login, name, group, "Участник проекта", login, login);
+                    var email = member.FirstProperty("email", "emailAddress", "mail").StringValue() ?? string.Empty;
+                    employees[login] = new Employee(login, name, group, "Участник проекта", login, login, email);
                 }
                 if (count < PageSize)
                 {

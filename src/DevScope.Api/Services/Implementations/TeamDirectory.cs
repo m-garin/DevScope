@@ -32,7 +32,8 @@ public sealed class TeamDirectory(IOptions<DevScopeOptions> options) : ITeamDire
                 team.Name,
                 member.Roles.FirstOrDefault() ?? "Сотрудник",
                 member.YouTrackLogin,
-                member.GitLabUsername)))
+                member.GitLabUsername,
+                member.Email)))
             .OrderBy(employee => employee.DisplayName)
             .ToArray();
     }

@@ -6,7 +6,8 @@
       "team": "Fintender · Разработка",
       "role": "Backend",
       "youTrackLogin": "ivan.petrov",
-      "gitLabUsername": "ipetrov"
+      "gitLabUsername": "ipetrov",
+      "email": "ipetrov@example.test"
     },
     {
       "id": "employee-2",
@@ -14,7 +15,8 @@
       "team": "Fintender · Разработка",
       "role": "Frontend",
       "youTrackLogin": "alexey.smirnov",
-      "gitLabUsername": "asmirnov"
+      "gitLabUsername": "asmirnov",
+      "email": "asmirnov@example.test"
     }
   ],
   "tasks": [

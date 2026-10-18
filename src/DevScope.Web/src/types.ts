@@ -31,6 +31,10 @@ export interface GitLabReference {
   employeeIsReviewer?: boolean
   commitAuthorsKnown?: boolean
   otherCommitAuthors?: string[]
+  employeeCreatedMergeRequest?: boolean
+  employeeMergedMergeRequest?: boolean
+  employeeResolvedThreads?: boolean
+  employeeActionFactsKnown?: boolean
 }
 
 export interface TaskActivity {

@@ -14,4 +14,8 @@ public sealed record GitLabReference(
     int EmployeeCommitCount = 0,
     bool EmployeeIsReviewer = false,
     bool CommitAuthorsKnown = false,
-    IReadOnlyList<string>? OtherCommitAuthors = null);
+    IReadOnlyList<string>? OtherCommitAuthors = null,
+    bool EmployeeCreatedMergeRequest = false,
+    bool EmployeeMergedMergeRequest = false,
+    bool EmployeeResolvedThreads = false,
+    bool EmployeeActionFactsKnown = false);

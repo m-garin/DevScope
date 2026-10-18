@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DevScope.Api.Configuration;
@@ -26,6 +27,7 @@ public sealed partial class McpActivityProvider(
     private static readonly string[] CommentToolCandidates = ["youtrack_get_issue_comments", "get_issue_comments"];
     private static readonly string[] MergeRequestListToolCandidates = ["gitlab_gitlab_mr_list", "gitlab_mr_list", "mr_list"];
     private static readonly string[] MergeRequestToolCandidates = ["gitlab_gitlab_mr_details", "gitlab_mr_details", "mr_details"];
+    private static readonly string[] MergeRequestCommentsToolCandidates = ["gitlab_gitlab_mr_comments", "gitlab_mr_comments", "mr_comments"];
     private readonly ConcurrentDictionary<string, TaskActivity> _taskCache = new(StringComparer.OrdinalIgnoreCase);
 
     public Task<IReadOnlyList<Employee>> GetEmployeesAsync(CancellationToken cancellationToken) =>
@@ -53,12 +55,13 @@ public sealed partial class McpActivityProvider(
         var issueTool = ResolveTool(toolNames, IssueToolCandidates);
         var commentTool = ResolveTool(toolNames, CommentToolCandidates);
         var mergeRequestTool = await ResolveMergeRequestToolAsync(cancellationToken);
+        var mergeRequestCommentsTool = await ResolveMergeRequestCommentsToolAsync(cancellationToken);
         var mergeRequestListTool = await ResolveMergeRequestListToolAsync(cancellationToken);
         var workItemTool = ResolveTool(toolNames, WorkItemToolCandidates);
         if (workItemTool is not null)
         {
             return await GetExactPeriodSummaryAsync(
-                workItemTool, issueTool, commentTool, mergeRequestListTool, mergeRequestTool,
+                workItemTool, issueTool, commentTool, mergeRequestListTool, mergeRequestTool, mergeRequestCommentsTool,
                 employee, from, to, cancellationToken);
         }
 
@@ -162,8 +165,10 @@ public sealed partial class McpActivityProvider(
                         ["include_discussions"] = true
                     },
                     cancellationToken);
-                task = task with { GitLab = EnrichGitLabReference(task.GitLab, details, employee) };
-                gitLabEvents.AddRange(ParseGitLabEvents(details, task.Id, employee, task.GitLab));
+                var supplementalNotes = await ReadMergeRequestCommentsAsync(
+                    mergeRequestCommentsTool, task.GitLab, cancellationToken);
+                task = task with { GitLab = EnrichGitLabReference(task.GitLab, details, employee, supplementalNotes) };
+                gitLabEvents.AddRange(ParseGitLabEvents(details, task.Id, employee, task.GitLab, supplementalNotes));
             }
 
             if (task?.GitLab is { } gitLab)
@@ -197,7 +202,7 @@ public sealed partial class McpActivityProvider(
         }
 
         var reviewerSearchAvailable = await AddReviewerAssignmentsAsync(
-            taskActivities, gitLabEvents, issueTool, mergeRequestTool,
+            taskActivities, gitLabEvents, issueTool, mergeRequestTool, mergeRequestCommentsTool,
             employee, cancellationToken);
         if (!reviewerSearchAvailable && !string.IsNullOrWhiteSpace(employee.GitLabUsername))
         {
@@ -247,6 +252,7 @@ public sealed partial class McpActivityProvider(
         string? commentTool,
         string? mergeRequestListTool,
         string? mergeRequestTool,
+        McpToolInfo? mergeRequestCommentsTool,
         Employee employee,
         DateOnly from,
         DateOnly to,
@@ -317,8 +323,10 @@ public sealed partial class McpActivityProvider(
                         ["include_discussions"] = true
                     },
                     cancellationToken);
-                task = task with { GitLab = EnrichGitLabReference(task.GitLab, details, employee) };
-                events.AddRange(ParseGitLabEvents(details, task.Id, employee, task.GitLab));
+                var supplementalNotes = await ReadMergeRequestCommentsAsync(
+                    mergeRequestCommentsTool, task.GitLab, cancellationToken);
+                task = task with { GitLab = EnrichGitLabReference(task.GitLab, details, employee, supplementalNotes) };
+                events.AddRange(ParseGitLabEvents(details, task.Id, employee, task.GitLab, supplementalNotes));
             }
 
             if (task?.GitLab is { } gitLab)
@@ -354,7 +362,7 @@ public sealed partial class McpActivityProvider(
         }
 
         var reviewerSearchAvailable = await AddReviewerAssignmentsAsync(
-            activities, events, issueTool, mergeRequestTool,
+            activities, events, issueTool, mergeRequestTool, mergeRequestCommentsTool,
             employee, cancellationToken);
         if (!reviewerSearchAvailable && !string.IsNullOrWhiteSpace(employee.GitLabUsername))
         {
@@ -672,6 +680,72 @@ public sealed partial class McpActivityProvider(
         return ResolveTool(tools.Select(tool => tool.Name), MergeRequestListToolCandidates);
     }
 
+    private async Task<McpToolInfo?> ResolveMergeRequestCommentsToolAsync(CancellationToken cancellationToken)
+    {
+        var servers = await mcp.GetServerNamesAsync(cancellationToken);
+        if (!servers.Contains(GitLabServer, StringComparer.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var tools = await mcp.ListToolsAsync(GitLabServer, cancellationToken);
+        return tools.FirstOrDefault(tool =>
+            MergeRequestCommentsToolCandidates.Contains(tool.Name, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private async Task<IReadOnlyList<JsonElement>> ReadMergeRequestCommentsAsync(
+        McpToolInfo? tool,
+        GitLabReference reference,
+        CancellationToken cancellationToken)
+    {
+        if (tool is null ||
+            tool.InputSchema.FirstProperty("properties") is not { ValueKind: JsonValueKind.Object } properties)
+        {
+            return [];
+        }
+
+        const int pageSize = 20;
+        var result = new List<JsonElement>();
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var page = 1; page <= 50; page++)
+        {
+            var arguments = new Dictionary<string, object?>();
+            AddSupportedArgument(arguments, properties, "project_id", reference.ProjectPath);
+            AddSupportedArgument(arguments, properties, "projectId", reference.ProjectPath);
+            AddSupportedArgument(arguments, properties, "mr_iid", reference.MergeRequestIid);
+            AddSupportedArgument(arguments, properties, "mrIid", reference.MergeRequestIid);
+            AddSupportedArgument(arguments, properties, "page", page);
+            AddSupportedArgument(arguments, properties, "per_page", pageSize);
+            AddSupportedArgument(arguments, properties, "perPage", pageSize);
+
+            var payload = await mcp.CallToolAsync(GitLabServer, tool.Name, arguments, cancellationToken);
+            var items = payload.FindArray("comments", "notes", "items", "data");
+            if (items is null)
+            {
+                break;
+            }
+
+            var pageItems = items.Value.EnumerateArray().ToArray();
+            var added = 0;
+            foreach (var item in pageItems)
+            {
+                var id = item.FirstProperty("id").StringValue() ?? item.GetRawText();
+                if (seenIds.Add(id))
+                {
+                    result.Add(item.Clone());
+                    added++;
+                }
+            }
+
+            var hasNext = payload.FirstProperty("hasNextPage", "has_more", "hasMore") is { ValueKind: JsonValueKind.True };
+            if (pageItems.Length == 0 || added == 0 || (!hasNext && pageItems.Length < pageSize))
+            {
+                break;
+            }
+        }
+        return result;
+    }
+
     private async Task<GitLabReference?> FindMergeRequestByTaskKeyAsync(
         string toolName,
         JsonElement issue,
@@ -737,6 +811,7 @@ public sealed partial class McpActivityProvider(
         List<ActivityEvent> events,
         string? issueTool,
         string? mergeRequestTool,
+        McpToolInfo? mergeRequestCommentsTool,
         Employee employee,
         CancellationToken cancellationToken)
     {
@@ -819,11 +894,13 @@ public sealed partial class McpActivityProvider(
                         ["include_discussions"] = true
                     },
                     cancellationToken);
-                gitLabReference = EnrichGitLabReference(gitLabReference, details, employee) with
+                var supplementalNotes = await ReadMergeRequestCommentsAsync(
+                    mergeRequestCommentsTool, gitLabReference, cancellationToken);
+                gitLabReference = EnrichGitLabReference(gitLabReference, details, employee, supplementalNotes) with
                 {
                     EmployeeIsReviewer = true
                 };
-                events.AddRange(ParseGitLabEvents(details, task.Id, employee, gitLabReference));
+                events.AddRange(ParseGitLabEvents(details, task.Id, employee, gitLabReference, supplementalNotes));
             }
 
             task = task with { GitLab = EnsureMergeRequestUrl(gitLabReference) };
@@ -1072,14 +1149,21 @@ public sealed partial class McpActivityProvider(
     private GitLabReference EnrichGitLabReference(
         GitLabReference reference,
         JsonElement details,
-        Employee employee)
+        Employee employee,
+        IReadOnlyList<JsonElement>? supplementalNotes = null)
     {
         var mergeRequest = FindMergeRequestDetails(details);
         var commits = details.FindArray("commits") ?? mergeRequest.FindArray("commits");
         var discussions = details.FindArray("discussions") ?? mergeRequest.FindArray("discussions");
-        var employeeNotes = EnumerateDiscussionNotes(details)
+        var allNotes = EnumerateDiscussionNotes(details)
+            .Concat(supplementalNotes ?? [])
+            .GroupBy(note => note.FirstProperty("id").StringValue() ?? note.GetRawText(), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        var employeeNotes = allNotes
             .Where(note => IsEmployeeGitLabAuthor(note, employee))
             .ToArray();
+        var mergedAt = ParseTimestamp(mergeRequest.FirstProperty("merged_at", "mergedAt"));
         var commitItems = commits?.EnumerateArray().ToArray();
         var employeeCommitCount = commitItems?.Count(commit => IsCommitByEmployee(commit, employee)) ?? 0;
         var otherCommitAuthors = commitItems?
@@ -1101,7 +1185,12 @@ public sealed partial class McpActivityProvider(
             EmployeeCommitCount = employeeCommitCount,
             EmployeeIsReviewer = reference.EmployeeIsReviewer || IsEmployeeListedAsReviewer(details, employee),
             CommitAuthorsKnown = commits is not null,
-            OtherCommitAuthors = otherCommitAuthors
+            OtherCommitAuthors = otherCommitAuthors,
+            EmployeeCreatedMergeRequest = IsEmployeeInUserProperty(mergeRequest, employee, "author", "created_by", "createdBy"),
+            EmployeeMergedMergeRequest = IsEmployeeInUserProperty(mergeRequest, employee, "merged_by", "mergedBy", "merge_user", "mergeUser") ||
+                                         employeeNotes.Any(note => IsMergeNote(note, mergedAt)),
+            EmployeeResolvedThreads = employeeNotes.Any(IsThreadResolutionNote),
+            EmployeeActionFactsKnown = true
         };
         return EnsureMergeRequestUrl(enriched, details);
     }
@@ -1261,7 +1350,8 @@ public sealed partial class McpActivityProvider(
         JsonElement details,
         string taskId,
         Employee employee,
-        GitLabReference reference)
+        GitLabReference reference,
+        IReadOnlyList<JsonElement>? supplementalNotes = null)
     {
         var mergeRequest = FindMergeRequestDetails(details);
         if ((details.FindArray("commits") ?? mergeRequest.FindArray("commits")) is { } commits)
@@ -1293,42 +1383,43 @@ public sealed partial class McpActivityProvider(
             }
         }
 
-        if ((details.FindArray("discussions") ?? mergeRequest.FindArray("discussions")) is not { } discussions)
+        var mergedAt = ParseTimestamp(mergeRequest.FirstProperty("merged_at", "mergedAt"));
+        var notes = EnumerateDiscussionNotes(details)
+            .Concat(supplementalNotes ?? [])
+            .GroupBy(note => note.FirstProperty("id").StringValue() ?? note.GetRawText(), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Take(500);
+        foreach (var note in notes)
         {
-            yield break;
-        }
-        foreach (var discussion in discussions.EnumerateArray().Take(100))
-        {
-            if (discussion.FindArray("notes") is not { } notes)
+            var occurredAt = ParseTimestamp(note.FirstProperty("created_at", "createdAt"));
+            if (occurredAt is null)
             {
                 continue;
             }
-            foreach (var note in notes.EnumerateArray().Take(100))
-            {
-                var occurredAt = ParseTimestamp(note.FirstProperty("created_at", "createdAt"));
-                if (occurredAt is null)
-                {
-                    continue;
-                }
-                var id = note.FirstProperty("id").StringValue() ?? Guid.NewGuid().ToString("N");
-                var isEmployeeAction = IsEmployeeGitLabAuthor(note, employee);
-                var isApproval = isEmployeeAction && IsApprovalNote(note);
-                var isComment = isEmployeeAction && !isApproval && !IsSystemNote(note);
-                yield return new ActivityEvent(
-                    $"gitlab:discussion:{id}",
-                    taskId,
-                    employee.Id,
-                    occurredAt.Value,
-                    "GitLab",
-                    isApproval ? "Approval" : isComment ? "ReviewComment" : "Discussion",
-                    isApproval
+            var id = note.FirstProperty("id").StringValue() ?? Guid.NewGuid().ToString("N");
+            var isEmployeeAction = IsEmployeeGitLabAuthor(note, employee);
+            var isMerge = isEmployeeAction && IsMergeNote(note, mergedAt);
+            var isApproval = isEmployeeAction && IsApprovalNote(note);
+            var isResolution = isEmployeeAction && IsThreadResolutionNote(note);
+            var isComment = isEmployeeAction && !isApproval && !isMerge && !isResolution && !IsSystemNote(note);
+            yield return new ActivityEvent(
+                $"gitlab:discussion:{id}",
+                taskId,
+                employee.Id,
+                occurredAt.Value,
+                "GitLab",
+                isMerge ? "Merge" : isApproval ? "Approval" : isResolution ? "ThreadResolution" : isComment ? "ReviewComment" : "Discussion",
+                isMerge
+                    ? $"Сотрудник слил MR !{reference.MergeRequestIid}"
+                    : isApproval
                         ? $"Сотрудник одобрил MR !{reference.MergeRequestIid}"
-                        : isComment
-                            ? $"Сотрудник оставил комментарий в MR !{reference.MergeRequestIid}"
-                            : $"Обсуждение MR !{reference.MergeRequestIid}",
-                    isApproval ? null : note.FirstProperty("body", "text").StringValue(),
-                    note.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url);
-            }
+                        : isResolution
+                            ? $"Сотрудник разрешил треды в MR !{reference.MergeRequestIid}"
+                            : isComment
+                                ? $"Сотрудник оставил комментарий в MR !{reference.MergeRequestIid}"
+                                : $"Обсуждение MR !{reference.MergeRequestIid}",
+                isApproval ? null : note.FirstProperty("body", "text").StringValue(),
+                note.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url);
         }
     }
 
@@ -1359,9 +1450,7 @@ public sealed partial class McpActivityProvider(
         {
             return false;
         }
-        var username = author.FirstProperty("username", "user_name", "login").StringValue();
-        return !string.IsNullOrWhiteSpace(username) &&
-               username.Equals(employee.GitLabUsername, StringComparison.OrdinalIgnoreCase);
+        return IsEmployeeGitLabUser(author, employee);
     }
 
     private static bool IsCommitByEmployee(JsonElement commit, Employee employee)
@@ -1376,6 +1465,12 @@ public sealed partial class McpActivityProvider(
         }
 
         var email = author.FirstProperty("email", "author_email").StringValue();
+        if (!string.IsNullOrWhiteSpace(email) &&
+            !string.IsNullOrWhiteSpace(employee.Email) &&
+            email.Trim().Equals(employee.Email.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
         var emailLocalPart = email?.Split('@', 2)[0];
         if (GitLabIdentityEquals(emailLocalPart, employee.GitLabUsername))
         {
@@ -1383,8 +1478,82 @@ public sealed partial class McpActivityProvider(
         }
 
         var name = author.FirstProperty("name", "author_name").StringValue();
-        return !string.IsNullOrWhiteSpace(name) &&
-               name.Trim().Equals(employee.DisplayName.Trim(), StringComparison.OrdinalIgnoreCase);
+        return NamesReferToSamePerson(name, employee.DisplayName);
+    }
+
+    private static bool NamesReferToSamePerson(string? actual, string? expected)
+    {
+        if (string.IsNullOrWhiteSpace(actual) || string.IsNullOrWhiteSpace(expected))
+        {
+            return false;
+        }
+
+        var actualTokens = NormalizeNameTokens(actual);
+        var expectedTokens = NormalizeNameTokens(expected);
+        return NameTokenSetsMatch(actualTokens, expectedTokens) ||
+               NameTokenSetsMatch(
+                   NormalizeNameTokens(TransliterateCyrillic(actual)),
+                   NormalizeNameTokens(TransliterateCyrillic(expected)));
+    }
+
+    private static string[] NormalizeNameTokens(string value)
+    {
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var normalized = new string(decomposed
+            .Where(character => CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+            .Select(character => char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : ' ')
+            .ToArray());
+        return normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static bool NameTokenSetsMatch(IReadOnlyList<string> left, IReadOnlyList<string> right)
+    {
+        if (left.Count == 0 || left.Count != right.Count)
+        {
+            return false;
+        }
+
+        var remaining = right.ToList();
+        var hasStableToken = false;
+        foreach (var token in left.OrderByDescending(item => item.Length))
+        {
+            var exactIndex = remaining.FindIndex(item => item.Equals(token, StringComparison.Ordinal));
+            if (exactIndex >= 0)
+            {
+                hasStableToken |= token.Length >= 3;
+                remaining.RemoveAt(exactIndex);
+                continue;
+            }
+
+            var initialIndex = remaining.FindIndex(item =>
+                token.Length > 0 && item.Length > 0 && token[0] == item[0] &&
+                (token.Length == 1 || item.Length == 1));
+            if (initialIndex < 0)
+            {
+                return false;
+            }
+            remaining.RemoveAt(initialIndex);
+        }
+        return remaining.Count == 0 && hasStableToken;
+    }
+
+    private static string TransliterateCyrillic(string value)
+    {
+        var result = new StringBuilder(value.Length * 2);
+        foreach (var character in value.ToLowerInvariant())
+        {
+            result.Append(character switch
+            {
+                'а' => "a", 'б' => "b", 'в' => "v", 'г' => "g", 'д' => "d", 'е' or 'ё' => "e",
+                'ж' => "zh", 'з' => "z", 'и' or 'й' => "i", 'к' => "k", 'л' => "l", 'м' => "m",
+                'н' => "n", 'о' => "o", 'п' => "p", 'р' => "r", 'с' => "s", 'т' => "t",
+                'у' => "u", 'ф' => "f", 'х' => "kh", 'ц' => "ts", 'ч' => "ch", 'ш' => "sh",
+                'щ' => "sch", 'ы' => "y", 'э' => "e", 'ю' => "yu", 'я' => "ya",
+                'ъ' or 'ь' => string.Empty,
+                _ => character.ToString()
+            });
+        }
+        return result.ToString();
     }
 
     private static string GetCommitAuthorLabel(JsonElement commit)
@@ -1485,18 +1654,9 @@ public sealed partial class McpActivityProvider(
 
     private static bool IsEmployeeListedAsApprover(JsonElement details, Employee employee)
     {
-        if (string.IsNullOrWhiteSpace(employee.GitLabUsername) ||
-            details.FindArray("approved_by", "approvedBy", "approvers") is not { } approvers)
-        {
-            return false;
-        }
-        return approvers.EnumerateArray().Any(item =>
-        {
-            var user = item.FirstProperty("user") is { ValueKind: JsonValueKind.Object } nested ? nested : item;
-            var username = user.FirstProperty("username", "user_name", "login").StringValue();
-            return !string.IsNullOrWhiteSpace(username) &&
-                   username.Equals(employee.GitLabUsername, StringComparison.OrdinalIgnoreCase);
-        });
+        var mergeRequest = FindMergeRequestDetails(details);
+        return IsEmployeeInUserArray(details, employee, "approved_by", "approvedBy", "approvers") ||
+               IsEmployeeInUserArray(mergeRequest, employee, "approved_by", "approvedBy", "approvers");
     }
 
     private static bool IsApprovalNote(JsonElement note)
@@ -1506,8 +1666,43 @@ public sealed partial class McpActivityProvider(
                body?.Equals("approved", StringComparison.OrdinalIgnoreCase) == true;
     }
 
+    private static bool IsMergeNote(JsonElement note, DateTimeOffset? mergedAt)
+    {
+        if (!IsSystemNote(note))
+        {
+            return false;
+        }
+
+        var body = note.FirstProperty("body", "text").StringValue();
+        if (body?.Contains("merged this merge request", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return true;
+        }
+        if (mergedAt is null ||
+            body?.Contains("mentioned in commit", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            return false;
+        }
+
+        var noteCreatedAt = ParseTimestamp(note.FirstProperty("created_at", "createdAt"));
+        return noteCreatedAt is not null &&
+               Math.Abs((noteCreatedAt.Value - mergedAt.Value).TotalMinutes) <= 5;
+    }
+
+    private static bool IsThreadResolutionNote(JsonElement note)
+    {
+        if (!IsSystemNote(note))
+        {
+            return false;
+        }
+        var body = note.FirstProperty("body", "text").StringValue();
+        return body?.Contains("resolved all threads", StringComparison.OrdinalIgnoreCase) == true ||
+               body?.Contains("resolved thread", StringComparison.OrdinalIgnoreCase) == true ||
+               body?.Contains("разрешил все обсуждения", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
     private static bool IsSystemNote(JsonElement note) =>
-        note.FirstProperty("system") is { ValueKind: JsonValueKind.True };
+        note.FirstProperty("system", "is_system", "isSystem") is { ValueKind: JsonValueKind.True };
 
     private static string? BuildWorkItemUrl(string taskUrl, string workItemId)
     {

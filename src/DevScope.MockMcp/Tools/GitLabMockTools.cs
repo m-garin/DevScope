@@ -157,5 +157,34 @@ public sealed class GitLabMockTools(MockDataStore store)
 
         return result;
     }
+
+    [McpServerTool(Name = "gitlab_gitlab_mr_comments")]
+    [Description("Read-only paginated Merge Request comments and system notes.")]
+    public JsonObject MergeRequestComments(
+        string project_id,
+        int mr_iid,
+        int page = 1,
+        int per_page = 20)
+    {
+        var notes = new JsonNode[]
+        {
+            new JsonObject
+            {
+                ["id"] = $"{mr_iid}-review",
+                ["author"] = new JsonObject { ["username"] = "ipetrov", ["name"] = "Иван Петров" },
+                ["body"] = "Mock review comment",
+                ["created_at"] = "2026-10-11T14:05:00+03:00",
+                ["system"] = false,
+                ["resolvable"] = true
+            }
+        };
+        var offset = Math.Max(0, page - 1) * per_page;
+        var items = notes.Skip(offset).Take(per_page).Select(item => item.DeepClone()).ToArray();
+        return new JsonObject
+        {
+            ["comments"] = new JsonArray(items),
+            ["hasNextPage"] = offset + items.Length < notes.Length
+        };
+    }
 }
 

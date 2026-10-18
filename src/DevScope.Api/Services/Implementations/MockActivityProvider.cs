@@ -35,11 +35,15 @@ public sealed class MockActivityProvider(IWebHostEnvironment environment) : IAct
         var taskIds = worklogs.Select(item => item.TaskId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var tasks = data.Tasks
             .Where(item => taskIds.Contains(item.Id))
-            .Select(task => new TaskActivity(
-                task,
-                worklogs.Where(item => item.TaskId == task.Id).Sum(item => item.DurationMinutes),
-                worklogs.Where(item => item.TaskId == task.Id).ToArray(),
-                task.DeveloperId == employeeId))
+            .Select(task =>
+            {
+                var enrichedTask = EnrichMockTask(task, employee);
+                return new TaskActivity(
+                    enrichedTask,
+                    worklogs.Where(item => item.TaskId == task.Id).Sum(item => item.DurationMinutes),
+                    worklogs.Where(item => item.TaskId == task.Id).ToArray(),
+                    task.DeveloperId == employeeId);
+            })
             .OrderByDescending(item => item.Worklogs.Max(worklog => worklog.Date))
             .ToArray();
 
@@ -91,10 +95,36 @@ public sealed class MockActivityProvider(IWebHostEnvironment environment) : IAct
         }
 
         return new TaskActivity(
-            task,
+            EnrichMockTask(task, data.Employees.Single(item => item.Id == employeeId)),
             worklogs.Sum(item => item.DurationMinutes),
             worklogs,
             task.DeveloperId == employeeId);
+    }
+
+    private static WorkTask EnrichMockTask(WorkTask task, Employee employee)
+    {
+        if (task.GitLab is not { } gitLab)
+        {
+            return task;
+        }
+
+        var isEmployeeAuthor = string.Equals(task.DeveloperId, employee.Id, StringComparison.OrdinalIgnoreCase);
+        var isReviewer = !isEmployeeAuthor &&
+            (task.Type?.Contains("review", StringComparison.OrdinalIgnoreCase) == true ||
+             task.Summary.Contains("review", StringComparison.OrdinalIgnoreCase));
+        return task with
+        {
+            GitLab = gitLab with
+            {
+                EmployeeCommitCount = isEmployeeAuthor ? gitLab.CommitCount : 0,
+                EmployeeIsReviewer = isReviewer,
+                CommitAuthorsKnown = true,
+                EmployeeActionFactsKnown = true,
+                OtherCommitAuthors = !isEmployeeAuthor && gitLab.CommitCount > 0
+                    ? [$"Mock Developer ({gitLab.CommitCount})"]
+                    : []
+            }
+        };
     }
 
     private static async Task<MockData> LoadAsync(string contentRoot)

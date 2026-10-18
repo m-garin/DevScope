@@ -6,4 +6,5 @@ public sealed record Employee(
     string Team,
     string Role,
     string YouTrackLogin,
-    string GitLabUsername);
+    string GitLabUsername,
+    string Email = "");

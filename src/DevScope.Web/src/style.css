@@ -81,6 +81,7 @@ h2 { margin: 0; font-size: 19px; }
 .gitlab-signal { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; color: #5a4776; background: #eee6f8; border-radius: 14px; font-weight: 650; }
 .gitlab-signal.reviewer { color: #315f8e; background: #e5f0fb; }
 .gitlab-signal.approved { color: #2d6b42; background: #e4f4e9; }
+.gitlab-no-action { color: #857592; font-size: 11px; }
 .mr-unavailable { margin-left: auto; color: #857592; font-size: 11px; }
 .analysis-action { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
 .analysis-action .p-button { display: inline-flex; gap: 7px; }

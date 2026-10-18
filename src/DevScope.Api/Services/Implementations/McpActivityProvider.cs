@@ -166,6 +166,11 @@ public sealed partial class McpActivityProvider(
                 gitLabEvents.AddRange(ParseGitLabEvents(details, task.Id, employee, task.GitLab));
             }
 
+            if (task?.GitLab is { } gitLab)
+            {
+                task = task with { GitLab = EnsureMergeRequestUrl(gitLab, issuePayload) };
+            }
+
             task ??= new WorkTask(taskId, taskId, "Неизвестно", null, null, string.Empty, null);
             var taskWorklogs = datesByTask.TryGetValue(taskId, out var taskDates)
                 ? taskDates.OrderByDescending(date => date).Select(date => new Worklog(
@@ -302,6 +307,11 @@ public sealed partial class McpActivityProvider(
                     cancellationToken);
                 task = task with { GitLab = EnrichGitLabReference(task.GitLab, details, employee) };
                 events.AddRange(ParseGitLabEvents(details, task.Id, employee, task.GitLab));
+            }
+
+            if (task?.GitLab is { } gitLab)
+            {
+                task = task with { GitLab = EnsureMergeRequestUrl(gitLab, issuePayload) };
             }
 
             task ??= new WorkTask(taskId, taskId, "Неизвестно", null, null, string.Empty, null);
@@ -749,7 +759,7 @@ public sealed partial class McpActivityProvider(
             : null;
     }
 
-    private static GitLabReference EnrichGitLabReference(
+    private GitLabReference EnrichGitLabReference(
         GitLabReference reference,
         JsonElement details,
         Employee employee)
@@ -760,7 +770,7 @@ public sealed partial class McpActivityProvider(
         var employeeNotes = EnumerateDiscussionNotes(details)
             .Where(note => IsEmployeeGitLabAuthor(note, employee))
             .ToArray();
-        return reference with
+        var enriched = reference with
         {
             Branch = mergeRequest.FirstProperty("source_branch", "branch").StringValue() ?? reference.Branch,
             MergeRequestState = ResolveMergeRequestState(mergeRequest, reference.MergeRequestState),
@@ -770,6 +780,119 @@ public sealed partial class McpActivityProvider(
             EmployeeApproved = IsEmployeeListedAsApprover(details, employee) || employeeNotes.Any(IsApprovalNote),
             EmployeeCommentCount = employeeNotes.Count(note => !IsApprovalNote(note) && !IsSystemNote(note))
         };
+        return EnsureMergeRequestUrl(enriched, details);
+    }
+
+    private GitLabReference EnsureMergeRequestUrl(GitLabReference reference, JsonElement? payload = null)
+    {
+        if (TryAbsoluteHttpUri(reference.Url, out _))
+        {
+            return reference;
+        }
+
+        var payloadUrls = payload is { } value
+            ? EnumerateWebUrls(value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+            : [];
+        var directUrl = payloadUrls.FirstOrDefault(url =>
+            TryAbsoluteHttpUri(url, out var uri) &&
+            uri.AbsolutePath.Contains($"/-/merge_requests/{reference.MergeRequestIid}", StringComparison.OrdinalIgnoreCase));
+        if (directUrl is not null)
+        {
+            return reference with { Url = directUrl };
+        }
+
+        var projectPath = Uri.TryCreate(reference.ProjectPath, UriKind.Absolute, out var repositoryUri)
+            ? repositoryUri.AbsolutePath
+            : reference.ProjectPath;
+        projectPath = projectPath.Trim().Trim('/');
+        if (projectPath.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+        {
+            projectPath = projectPath[..^4];
+        }
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return reference;
+        }
+
+        Uri? baseUri = null;
+        if (repositoryUri is not null &&
+            repositoryUri.Scheme is "http" or "https")
+        {
+            baseUri = new Uri(repositoryUri.GetLeftPart(UriPartial.Authority));
+        }
+        baseUri ??= payloadUrls
+            .Select(url => TryAbsoluteHttpUri(url, out var uri) ? uri : null)
+            .Where(uri => uri is not null && IsProjectUrl(uri, projectPath))
+            .Select(uri => new Uri(uri!.GetLeftPart(UriPartial.Authority)))
+            .FirstOrDefault();
+        if (baseUri is null && TryAbsoluteHttpUri(options.Value.GitLabBaseUrl, out var configuredBaseUri))
+        {
+            baseUri = configuredBaseUri;
+        }
+        if (baseUri is null)
+        {
+            return reference;
+        }
+
+        var escapedProjectPath = string.Join('/', projectPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(segment => Uri.EscapeDataString(Uri.UnescapeDataString(segment))));
+        var url = $"{baseUri.AbsoluteUri.TrimEnd('/')}/{escapedProjectPath}/-/merge_requests/{reference.MergeRequestIid}";
+        return TryAbsoluteHttpUri(url, out _) ? reference with { Url = url } : reference;
+    }
+
+    private static bool IsProjectUrl(Uri uri, string projectPath)
+    {
+        var decodedPath = Uri.UnescapeDataString(uri.AbsolutePath).Trim('/');
+        return decodedPath.Equals(projectPath, StringComparison.OrdinalIgnoreCase) ||
+               decodedPath.StartsWith($"{projectPath}/", StringComparison.OrdinalIgnoreCase) ||
+               decodedPath.Equals($"{projectPath}.git", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> EnumerateWebUrls(JsonElement element, int depth = 0)
+    {
+        if (depth > 12)
+        {
+            yield break;
+        }
+
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.String &&
+                    property.Value.GetString() is { } url &&
+                    TryAbsoluteHttpUri(url, out _))
+                {
+                    yield return url;
+                }
+                foreach (var nestedUrl in EnumerateWebUrls(property.Value, depth + 1))
+                {
+                    yield return nestedUrl;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                foreach (var nestedUrl in EnumerateWebUrls(item, depth + 1))
+                {
+                    yield return nestedUrl;
+                }
+            }
+        }
+    }
+
+    private static bool TryAbsoluteHttpUri(string? value, out Uri uri)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out var parsed) && parsed.Scheme is "http" or "https")
+        {
+            uri = parsed;
+            return true;
+        }
+
+        uri = null!;
+        return false;
     }
 
     private static JsonElement FindMergeRequestDetails(JsonElement details)

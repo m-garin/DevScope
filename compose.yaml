@@ -12,6 +12,7 @@ services:
       DevScope__TeamsConfigPath: /app/config/teams.json
       DevScope__ProjectKey: ${DEVSCOPE_PROJECT_KEY:-FINTDR}
       DevScope__DeveloperGroup: ${DEVSCOPE_DEVELOPER_GROUP:-Fintender-Backend}
+      DevScope__GitLabBaseUrl: ${DEVSCOPE_GITLAB_BASE_URL:-}
       DevScope__DailyRefreshHour: ${DEVSCOPE_DAILY_REFRESH_HOUR:-3}
       ConnectionStrings__DevScope: Host=postgres;Port=5432;Database=${DEVSCOPE_DB_NAME:-devscope};Username=${DEVSCOPE_DB_USER:-devscope};Password=${DEVSCOPE_DB_PASSWORD:-devscope-local-only}
       TZ: Europe/Moscow

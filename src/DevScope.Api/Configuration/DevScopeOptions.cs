@@ -8,6 +8,7 @@ public sealed class DevScopeOptions
     public string TeamsConfigPath { get; set; } = "config/teams.json";
     public string ProjectKey { get; set; } = "FINTDR";
     public string DeveloperGroup { get; set; } = "Fintender-Backend";
+    public string? GitLabBaseUrl { get; set; }
     public int McpTimeoutSeconds { get; set; } = 120;
     public int DailyRefreshHour { get; set; } = 3;
 }

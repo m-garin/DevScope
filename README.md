@@ -59,7 +59,13 @@ Invoke-RestMethod http://127.0.0.1:8080/api/employees
 ```text
 DEVSCOPE_PROJECT_KEY=FINTDR
 DEVSCOPE_DEVELOPER_GROUP=Fintender-Backend
+DEVSCOPE_GITLAB_BASE_URL=https://gitlab.example.com
 ```
+
+`DEVSCOPE_GITLAB_BASE_URL` используется как резервный адрес для формирования
+ссылки на MR, если GitLab MCP не вернул `web_url`. Сначала приложение пытается
+получить прямую ссылку или адрес GitLab из ответа MCP, и только затем использует
+это значение.
 
 PostgreSQL поднимается тем же compose-файлом. При необходимости измените локальные
 параметры базы в `.env.real`:

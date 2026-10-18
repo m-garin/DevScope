@@ -27,6 +27,10 @@ export interface GitLabReference {
   url?: string
   employeeApproved?: boolean
   employeeCommentCount?: number
+  employeeCommitCount?: number
+  employeeIsReviewer?: boolean
+  commitAuthorsKnown?: boolean
+  otherCommitAuthors?: string[]
 }
 
 export interface TaskActivity {

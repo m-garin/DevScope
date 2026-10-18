@@ -57,6 +57,9 @@ h2 { margin: 0; font-size: 19px; }
 .task-signals { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
 .foreign { color: #6f43b5; background: #f0eafd; }
 .digital-twin { color: #247344; background: #e4f4e9; }
+.execution-estimate { display: flex; align-items: center; gap: 7px; width: fit-content; margin-top: 14px; padding: 7px 10px; color: #526078; background: #f2f6fc; border-radius: 8px; font-size: 12px; }
+.execution-estimate svg { color: #1769e0; }
+.execution-estimate strong { color: #1a2639; }
 .worklog-total { display: flex; align-items: center; gap: 8px; margin: 17px 0 10px; color: #526078; }
 .worklog-total strong { color: #1a2639; font-size: 18px; }
 .worklog-total span { font-size: 12px; }
@@ -70,10 +73,12 @@ h2 { margin: 0; font-size: 19px; }
 .row-link:hover, .mr-link:hover, .timeline-heading a:hover { text-decoration: underline; }
 .gitlab-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 17px; margin-top: 13px; padding: 10px 12px; color: #68518d; background: #faf5ff; border-radius: 8px; font-size: 12px; }
 .gitlab-row .branch { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gitlab-row .commit-authors { color: #8a7a9b; font-size: 11px; }
 .gitlab-row .mr-state { color: #59456f; font-weight: 650; }
 .gitlab-row .mr-link { margin-left: auto; padding: 6px 9px; color: #fff; background: #7252a0; border-radius: 7px; }
 .gitlab-row .mr-link:hover { background: #604388; text-decoration: none; }
 .gitlab-signal { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; color: #5a4776; background: #eee6f8; border-radius: 14px; font-weight: 650; }
+.gitlab-signal.reviewer { color: #315f8e; background: #e5f0fb; }
 .gitlab-signal.approved { color: #2d6b42; background: #e4f4e9; }
 .mr-unavailable { margin-left: auto; color: #857592; font-size: 11px; }
 .analysis-action { display: flex; align-items: center; gap: 12px; margin-top: 14px; }

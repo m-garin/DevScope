@@ -32,19 +32,46 @@ public sealed class GitLabMockTools(MockDataStore store)
             ["state"] = gitLabReference?["mergeRequestState"]?.DeepClone() ?? "opened",
             ["source_branch"] = gitLabReference?["branch"]?.DeepClone(),
             ["target_branch"] = "main",
+            ["author"] = new JsonObject
+            {
+                ["username"] = "feature-author",
+                ["name"] = "Feature Author"
+            },
+            ["reviewers"] = new JsonArray(new JsonObject
+            {
+                ["username"] = "ipetrov",
+                ["name"] = "Иван Петров"
+            }),
             ["web_url"] = $"https://gitlab.example/{project_id}/-/merge_requests/{mr_iid}"
         };
 
         if (include_commits)
         {
-            result["commits"] = new JsonArray(new JsonObject
-            {
-                ["id"] = "abc123",
-                ["author_name"] = "Mock Developer",
-                ["author_email"] = "developer@example.test",
-                ["authored_date"] = "2026-10-12T11:42:00+03:00",
-                ["message"] = $"{task?["id"]?.GetValue<string>()} mock commit"
-            });
+            result["commits"] = new JsonArray(
+                new JsonObject
+                {
+                    ["id"] = "abc123",
+                    ["author_name"] = "Иван Петров",
+                    ["author_email"] = "ipetrov@example.test",
+                    ["authored_date"] = "2026-10-12T11:42:00+03:00",
+                    ["message"] = $"{task?["id"]?.GetValue<string>()} employee commit"
+                },
+                new JsonObject
+                {
+                    ["id"] = "def456",
+                    ["author_name"] = "Feature Author",
+                    ["author_email"] = "feature.author@example.test",
+                    ["authored_date"] = "2026-10-12T10:15:00+03:00",
+                    ["message"] = $"{task?["id"]?.GetValue<string>()} feature commit"
+                },
+                new JsonObject
+                {
+                    ["id"] = "ghi789",
+                    ["author_name"] = "Feature Author",
+                    ["author_email"] = "feature.author@example.test",
+                    ["authored_date"] = "2026-10-12T09:30:00+03:00",
+                    ["message"] = $"{task?["id"]?.GetValue<string>()} follow-up commit"
+                });
         }
 
         if (include_discussions)

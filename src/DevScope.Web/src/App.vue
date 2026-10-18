@@ -4,9 +4,9 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
-import { CalendarDays, ChartNoAxesColumnIncreasing, CheckCircle2, ChevronDown, Clock3, Database, ExternalLink, GitMerge, Info, RefreshCw, Save, Search, Settings, Sparkles, UserRound } from '@lucide/vue'
+import { CalendarDays, ChartNoAxesColumnIncreasing, CheckCircle2, ChevronDown, Clock3, Database, ExternalLink, GitMerge, Info, RefreshCw, Save, Search, Settings, Sparkles, UserCheck, UserRound } from '@lucide/vue'
 import { api } from './services/api'
-import type { ApplicationSettings, CacheRefreshInterval, Employee, LlmModelOption, PeriodSummary, TaskActivity, TaskAnalysis } from './types'
+import type { ApplicationSettings, CacheRefreshInterval, Employee, GitLabReference, LlmModelOption, PeriodSummary, TaskActivity, TaskAnalysis } from './types'
 
 const employees = ref<Employee[]>([])
 const selectedEmployee = ref<string>('')
@@ -89,6 +89,19 @@ function pluralizeCommits(count: number) {
   if (mod10 === 1) return `${count} коммит`
   if (mod10 >= 2 && mod10 <= 4) return `${count} коммита`
   return `${count} коммитов`
+}
+
+function formatCommitActivity(gitLab: GitLabReference) {
+  if (!gitLab.commitAuthorsKnown) return pluralizeCommits(gitLab.commitCount)
+  if (gitLab.commitCount === 0) return 'Коммитов в MR нет'
+
+  const employeeCount = gitLab.employeeCommitCount ?? 0
+  const otherCount = Math.max(0, gitLab.commitCount - employeeCount)
+  if (employeeCount > 0 && otherCount > 0) {
+    return `${pluralizeCommits(employeeCount)} сотрудника · ${pluralizeCommits(otherCount)} от других авторов`
+  }
+  if (employeeCount > 0) return `${pluralizeCommits(employeeCount)} сотрудника`
+  return `${pluralizeCommits(otherCount)} от других авторов`
 }
 
 function formatMergeRequestState(state: string) {
@@ -310,6 +323,11 @@ watch(selectedModel, value => {
                 </div>
                 <span class="status">{{ item.task.status }}</span>
               </div>
+              <div v-if="item.task.estimateMinutes !== undefined && item.task.estimateMinutes !== null" class="execution-estimate">
+                <ChartNoAxesColumnIncreasing :size="17" />
+                <span>Оценка на исполнение</span>
+                <strong>{{ formatDuration(item.task.estimateMinutes) }}</strong>
+              </div>
               <div class="worklog-total"><Clock3 :size="18" /><strong>{{ summary.hasExactWorklogDurations ? formatDuration(item.loggedMinutes) : item.worklogs.length }}</strong><span>{{ summary.hasExactWorklogDurations ? 'списал выбранный сотрудник' : 'дн. с подтверждёнными списаниями' }}</span></div>
               <div class="worklogs">
                 <div class="worklog-header" :class="{ presence: !summary.hasExactWorklogDurations }">
@@ -321,8 +339,10 @@ watch(selectedModel, value => {
                 </div>
               </div>
               <div v-if="item.task.gitLab" class="gitlab-row">
-                <GitMerge :size="17" /><strong>GitLab</strong><span v-if="item.task.gitLab.branch" class="branch">{{ item.task.gitLab.branch }}</span><span>{{ pluralizeCommits(item.task.gitLab.commitCount) }}</span>
+                <GitMerge :size="17" /><strong>GitLab</strong><span v-if="item.task.gitLab.branch" class="branch">{{ item.task.gitLab.branch }}</span><span>{{ formatCommitActivity(item.task.gitLab) }}</span>
+                <span v-if="item.task.gitLab.commitAuthorsKnown && item.task.gitLab.otherCommitAuthors?.length" class="commit-authors">{{ item.task.gitLab.otherCommitAuthors.join(', ') }}</span>
                 <span class="mr-state">MR !{{ item.task.gitLab.mergeRequestIid }}<template v-if="formatMergeRequestState(item.task.gitLab.mergeRequestState)"> · {{ formatMergeRequestState(item.task.gitLab.mergeRequestState) }}</template></span>
+                <span v-if="item.task.gitLab.employeeIsReviewer" class="gitlab-signal reviewer"><UserCheck :size="14" />Сотрудник — ревьюер MR</span>
                 <span v-if="item.task.gitLab.employeeApproved" class="gitlab-signal approved"><CheckCircle2 :size="14" />Аппрув сотрудника</span>
                 <span v-if="item.task.gitLab.employeeCommentCount" class="gitlab-signal">Комментариев сотрудника: {{ item.task.gitLab.employeeCommentCount }}</span>
                 <a v-if="item.task.gitLab.url" class="mr-link" :href="item.task.gitLab.url" target="_blank" rel="noopener noreferrer">Открыть MR !{{ item.task.gitLab.mergeRequestIid }}<ExternalLink :size="14" /></a>

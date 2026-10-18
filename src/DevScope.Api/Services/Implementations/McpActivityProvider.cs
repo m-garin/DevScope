@@ -553,7 +553,7 @@ public sealed partial class McpActivityProvider(
         var status = issue.FirstProperty("status", "state").StringValue() ?? Field("State", "Состояние_FT", "Статус") ?? "Неизвестно";
         var developer = issue.FirstProperty("developerId", "developer", "assignee").StringValue()
             ?? Field("$Разработчик", "Разработчик", "Исполнитель FT", "Assignee");
-        var estimate = issue.FirstProperty("estimateMinutes").IntValue();
+        var estimate = ParseExecutionEstimateMinutes(issue, fields);
         var url = issue.FirstProperty("url", "webUrl").StringValue() ?? string.Empty;
         var parent = issue.FirstProperty("parentSummary").StringValue();
         if (issue.FirstProperty("parentIssue", "parent") is { ValueKind: JsonValueKind.Object } parentIssue)
@@ -744,6 +744,43 @@ public sealed partial class McpActivityProvider(
         _ => ((JsonElement?)value).StringValue()
     };
 
+    private static int? ParseExecutionEstimateMinutes(JsonElement issue, JsonElement? fields)
+    {
+        var directEstimate = issue.FirstProperty("estimateMinutes").IntValue();
+        if (directEstimate is not null)
+        {
+            return directEstimate;
+        }
+
+        if (fields is null)
+        {
+            return null;
+        }
+
+        foreach (var property in fields.Value.EnumerateObject())
+        {
+            var fieldName = property.Name.TrimStart('$');
+            if (!fieldName.Equals("Оценка разработка БЭК ЧЧ", StringComparison.OrdinalIgnoreCase) &&
+                !fieldName.Equals("Оценка разработка БЭК", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var rawEstimate = ReadFieldValue(property.Value);
+            var match = ExecutionEstimateNumberRegex().Match(rawEstimate ?? string.Empty);
+            if (match.Success && decimal.TryParse(
+                    match.Value.Replace(',', '.'),
+                    NumberStyles.Number,
+                    CultureInfo.InvariantCulture,
+                    out var hours))
+            {
+                return (int)Math.Round(hours * 60, MidpointRounding.AwayFromZero);
+            }
+        }
+
+        return null;
+    }
+
     private static GitLabReference? ParseGitLabReferenceFromText(string text, string source)
     {
         var match = MergeRequestUrlRegex().Match(text);
@@ -770,6 +807,15 @@ public sealed partial class McpActivityProvider(
         var employeeNotes = EnumerateDiscussionNotes(details)
             .Where(note => IsEmployeeGitLabAuthor(note, employee))
             .ToArray();
+        var commitItems = commits?.EnumerateArray().ToArray();
+        var employeeCommitCount = commitItems?.Count(commit => IsCommitByEmployee(commit, employee)) ?? 0;
+        var otherCommitAuthors = commitItems?
+            .Where(commit => !IsCommitByEmployee(commit, employee))
+            .GroupBy(GetCommitAuthorLabel, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => $"{group.Key} ({group.Count()})")
+            .ToArray() ?? [];
         var enriched = reference with
         {
             Branch = mergeRequest.FirstProperty("source_branch", "branch").StringValue() ?? reference.Branch,
@@ -778,7 +824,11 @@ public sealed partial class McpActivityProvider(
             DiscussionCount = discussions?.GetArrayLength() ?? reference.DiscussionCount,
             Url = mergeRequest.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url,
             EmployeeApproved = IsEmployeeListedAsApprover(details, employee) || employeeNotes.Any(IsApprovalNote),
-            EmployeeCommentCount = employeeNotes.Count(note => !IsApprovalNote(note) && !IsSystemNote(note))
+            EmployeeCommentCount = employeeNotes.Count(note => !IsApprovalNote(note) && !IsSystemNote(note)),
+            EmployeeCommitCount = employeeCommitCount,
+            EmployeeIsReviewer = IsEmployeeListedAsReviewer(details, employee),
+            CommitAuthorsKnown = commits is not null,
+            OtherCommitAuthors = otherCommitAuthors
         };
         return EnsureMergeRequestUrl(enriched, details);
     }
@@ -940,7 +990,8 @@ public sealed partial class McpActivityProvider(
         Employee employee,
         GitLabReference reference)
     {
-        if (details.FindArray("commits") is { } commits)
+        var mergeRequest = FindMergeRequestDetails(details);
+        if ((details.FindArray("commits") ?? mergeRequest.FindArray("commits")) is { } commits)
         {
             foreach (var commit in commits.EnumerateArray().Take(100))
             {
@@ -950,6 +1001,8 @@ public sealed partial class McpActivityProvider(
                     continue;
                 }
                 var id = commit.FirstProperty("id", "short_id").StringValue() ?? Guid.NewGuid().ToString("N");
+                var isEmployeeCommit = IsCommitByEmployee(commit, employee);
+                var author = GetCommitAuthorLabel(commit);
                 yield return new ActivityEvent(
                     $"gitlab:commit:{id}",
                     taskId,
@@ -957,13 +1010,17 @@ public sealed partial class McpActivityProvider(
                     occurredAt.Value,
                     "GitLab",
                     "Commit",
-                    $"Коммит в {reference.Branch}",
-                    commit.FirstProperty("title", "message").StringValue(),
+                    isEmployeeCommit
+                        ? $"Коммит в {reference.Branch}"
+                        : $"Коммит другого автора в {reference.Branch}",
+                    isEmployeeCommit
+                        ? commit.FirstProperty("title", "message").StringValue()
+                        : $"Автор: {author}. {commit.FirstProperty("title", "message").StringValue()}",
                     commit.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url);
             }
         }
 
-        if (details.FindArray("discussions") is not { } discussions)
+        if ((details.FindArray("discussions") ?? mergeRequest.FindArray("discussions")) is not { } discussions)
         {
             yield break;
         }
@@ -1004,7 +1061,8 @@ public sealed partial class McpActivityProvider(
 
     private static IEnumerable<JsonElement> EnumerateDiscussionNotes(JsonElement details)
     {
-        if (details.FindArray("discussions") is not { } discussions)
+        var mergeRequest = FindMergeRequestDetails(details);
+        if ((details.FindArray("discussions") ?? mergeRequest.FindArray("discussions")) is not { } discussions)
         {
             yield break;
         }
@@ -1032,6 +1090,68 @@ public sealed partial class McpActivityProvider(
         return !string.IsNullOrWhiteSpace(username) &&
                username.Equals(employee.GitLabUsername, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsCommitByEmployee(JsonElement commit, Employee employee)
+    {
+        var author = commit.FirstProperty("author") is { ValueKind: JsonValueKind.Object } nested
+            ? nested
+            : commit;
+        var username = author.FirstProperty("username", "user_name", "login", "author_username").StringValue();
+        if (GitLabIdentityEquals(username, employee.GitLabUsername))
+        {
+            return true;
+        }
+
+        var email = author.FirstProperty("email", "author_email").StringValue();
+        var emailLocalPart = email?.Split('@', 2)[0];
+        if (GitLabIdentityEquals(emailLocalPart, employee.GitLabUsername))
+        {
+            return true;
+        }
+
+        var name = author.FirstProperty("name", "author_name").StringValue();
+        return !string.IsNullOrWhiteSpace(name) &&
+               name.Trim().Equals(employee.DisplayName.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetCommitAuthorLabel(JsonElement commit)
+    {
+        var author = commit.FirstProperty("author") is { ValueKind: JsonValueKind.Object } nested
+            ? nested
+            : commit;
+        return author.FirstProperty("name", "author_name").StringValue()?.Trim()
+            ?? author.FirstProperty("username", "user_name", "login", "author_username").StringValue()?.Trim()
+            ?? author.FirstProperty("email", "author_email").StringValue()?.Trim()
+            ?? "Неизвестный автор";
+    }
+
+    private static bool IsEmployeeListedAsReviewer(JsonElement details, Employee employee)
+    {
+        var mergeRequest = FindMergeRequestDetails(details);
+        return IsEmployeeInUserArray(details, employee, "reviewers", "assigned_reviewers", "assignedReviewers") ||
+               IsEmployeeInUserArray(mergeRequest, employee, "reviewers", "assigned_reviewers", "assignedReviewers");
+    }
+
+    private static bool IsEmployeeInUserArray(JsonElement details, Employee employee, params string[] propertyNames)
+    {
+        if (string.IsNullOrWhiteSpace(employee.GitLabUsername) ||
+            details.FindArray(propertyNames) is not { } users)
+        {
+            return false;
+        }
+
+        return users.EnumerateArray().Any(item =>
+        {
+            var user = item.FirstProperty("user") is { ValueKind: JsonValueKind.Object } nested ? nested : item;
+            var username = user.FirstProperty("username", "user_name", "login").StringValue();
+            return GitLabIdentityEquals(username, employee.GitLabUsername);
+        });
+    }
+
+    private static bool GitLabIdentityEquals(string? actual, string? expected) =>
+        !string.IsNullOrWhiteSpace(actual) &&
+        !string.IsNullOrWhiteSpace(expected) &&
+        actual.Trim().TrimStart('@').Equals(expected.Trim().TrimStart('@'), StringComparison.OrdinalIgnoreCase);
 
     private static bool IsEmployeeListedAsApprover(JsonElement details, Employee employee)
     {
@@ -1170,6 +1290,9 @@ public sealed partial class McpActivityProvider(
 
     [GeneratedRegex(@"(?<url>https?://[^/]+/(?<project>[^\s]+?)/-/merge_requests/(?<iid>\d+))", RegexOptions.IgnoreCase)]
     private static partial Regex MergeRequestUrlRegex();
+
+    [GeneratedRegex(@"\d+(?:[.,]\d+)?", RegexOptions.CultureInvariant)]
+    private static partial Regex ExecutionEstimateNumberRegex();
 
     private static Regex DurationPartRegex(string suffix) =>
         new($@"(\d+)\s*{suffix}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);

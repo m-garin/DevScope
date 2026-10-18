@@ -10,4 +10,8 @@ public sealed record GitLabReference(
     int DiscussionCount = 0,
     string? Url = null,
     bool EmployeeApproved = false,
-    int EmployeeCommentCount = 0);
+    int EmployeeCommentCount = 0,
+    int EmployeeCommitCount = 0,
+    bool EmployeeIsReviewer = false,
+    bool CommitAuthorsKnown = false,
+    IReadOnlyList<string>? OtherCommitAuthors = null);

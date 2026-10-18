@@ -48,9 +48,12 @@ h2 { margin: 0; font-size: 19px; }
 .worklog-total strong { color: #1a2639; font-size: 18px; }
 .worklog-total span { font-size: 12px; }
 .worklogs { display: grid; gap: 5px; }
-.worklogs > div { display: grid; grid-template-columns: 90px 145px 70px 1fr; gap: 10px; padding: 7px 9px; border-radius: 7px; background: #f7f9fc; font-size: 12px; }
-.worklogs em { color: #69758a; font-style: normal; }
+.worklogs > div { display: grid; grid-template-columns: 90px 145px 70px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 7px; background: #f7f9fc; font-size: 12px; }
+.worklogs em { min-width: 0; color: #69758a; font-style: normal; overflow-wrap: anywhere; }
+.row-link, .mr-link { display: inline-flex; align-items: center; gap: 5px; color: #1468d4; font-weight: 650; text-decoration: none; }
+.row-link:hover, .mr-link:hover, .timeline-heading a:hover { text-decoration: underline; }
 .gitlab-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 17px; margin-top: 13px; padding: 10px 12px; color: #68518d; background: #faf5ff; border-radius: 8px; font-size: 12px; }
+.gitlab-row .mr-link { color: #68518d; }
 .analysis-action { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
 .analysis-action .p-button { display: inline-flex; gap: 7px; }
 .analysis-action small { color: #8490a3; }
@@ -64,13 +67,17 @@ h2 { margin: 0; font-size: 19px; }
 .task-analysis dl > div { display: grid; grid-template-columns: 145px 1fr; gap: 12px; }
 .task-analysis dt { color: #536179; font-size: 12px; font-weight: 700; }
 .task-analysis dd { margin: 0; color: #425067; font-size: 12px; line-height: 1.5; }
-.timeline-item { position: relative; display: grid; grid-template-columns: 12px 96px 1fr; gap: 8px; padding: 14px 0 14px 8px; border-top: 1px solid #edf0f5; }
+.timeline { min-width: 0; }
+.timeline-item { position: relative; display: grid; grid-template-columns: 10px 84px minmax(0, 1fr); align-items: start; gap: 8px; padding: 14px 0 14px 8px; border-top: 1px solid #edf0f5; }
 .dot { width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: #1769e0; }
 .dot.gitlab { background: #e96521; }
-.timeline time { color: #768196; font-size: 12px; padding-top: 5px; }
-.timeline-item > div { display: grid; gap: 5px; }
+.timeline time { min-width: 0; color: #768196; font-size: 12px; line-height: 1.35; padding-top: 3px; }
+.timeline-content { min-width: 0; display: grid; gap: 7px; }
+.timeline-heading { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.timeline-heading a { min-width: 0; display: inline-flex; align-items: center; gap: 5px; color: inherit; }
+.timeline-heading strong { min-width: 0; overflow-wrap: anywhere; }
 .timeline-item strong { font-size: 13px; }
-.timeline-item p { margin: 0; color: #718096; font-size: 12px; line-height: 1.4; }
+.timeline-item p { min-width: 0; margin: 0; color: #718096; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
 .source { width: fit-content; padding: 3px 8px; border-radius: 20px; color: #1468d4; background: #e9f2ff; font-size: 11px; font-weight: 700; }
 .source.gitlab { color: #c24f13; background: #fff0e8; }
 .verified { display: flex; gap: 9px; margin-top: 18px; padding: 12px; border-radius: 9px; color: #4e6b58; background: #eef8f1; font-size: 12px; line-height: 1.45; }

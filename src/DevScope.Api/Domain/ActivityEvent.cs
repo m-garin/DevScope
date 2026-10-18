@@ -8,4 +8,5 @@ public sealed record ActivityEvent(
     string Source,
     string Kind,
     string Title,
-    string? Details);
+    string? Details,
+    string? Url = null);

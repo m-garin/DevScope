@@ -305,7 +305,13 @@ public sealed partial class McpActivityProvider(
             }
 
             task ??= new WorkTask(taskId, taskId, "Неизвестно", null, null, string.Empty, null);
-            var taskWorklogs = group.OrderByDescending(item => item.Date).ToArray();
+            var taskWorklogs = group
+                .OrderByDescending(item => item.Date)
+                .Select(item => item with
+                {
+                    Url = item.Url ?? BuildWorkItemUrl(task.Url, item.Id)
+                })
+                .ToArray();
             events.AddRange(taskWorklogs.Select(item => new ActivityEvent(
                 item.Id,
                 taskId,
@@ -314,7 +320,8 @@ public sealed partial class McpActivityProvider(
                 "YouTrack",
                 "Worklog",
                 $"Списано {item.DurationMinutes} мин в {taskId}",
-                item.Description)));
+                item.Description,
+                item.Url)));
             var activity = new TaskActivity(
                 task,
                 taskWorklogs.Sum(item => item.DurationMinutes),
@@ -484,7 +491,8 @@ public sealed partial class McpActivityProvider(
             date.Value,
             minutes.Value,
             type ?? "Работа",
-            item.FirstProperty("description", "text", "comment").StringValue());
+            item.FirstProperty("description", "text", "comment").StringValue(),
+            item.FirstProperty("web_url", "webUrl", "url").StringValue());
     }
 
     private static WorkTask? ParseEmbeddedTask(JsonElement workItem, Employee employee)
@@ -569,7 +577,8 @@ public sealed partial class McpActivityProvider(
                     iid.Value,
                     gitLab.FirstProperty("mergeRequestState", "state").StringValue() ?? "unknown",
                     gitLab.FirstProperty("commitCount").IntValue() ?? 0,
-                    "issue");
+                    "issue",
+                    Url: gitLab.FirstProperty("web_url", "webUrl", "url").StringValue());
             }
         }
 
@@ -660,7 +669,8 @@ public sealed partial class McpActivityProvider(
                 iid.Value,
                 item.FirstProperty("state").StringValue() ?? "unknown",
                 0,
-                "task-key");
+                "task-key",
+                Url: item.FirstProperty("web_url", "webUrl", "url").StringValue());
         }
         return null;
     }
@@ -706,7 +716,14 @@ public sealed partial class McpActivityProvider(
     {
         var match = MergeRequestUrlRegex().Match(text);
         return match.Success && int.TryParse(match.Groups["iid"].Value, out var iid)
-            ? new GitLabReference(match.Groups["project"].Value, string.Empty, iid, "unknown", 0, source)
+            ? new GitLabReference(
+                match.Groups["project"].Value,
+                string.Empty,
+                iid,
+                "unknown",
+                0,
+                source,
+                Url: match.Groups["url"].Value)
             : null;
     }
 
@@ -719,7 +736,8 @@ public sealed partial class McpActivityProvider(
             Branch = details.FirstProperty("source_branch", "branch").StringValue() ?? reference.Branch,
             MergeRequestState = details.FirstProperty("state", "merge_status").StringValue() ?? reference.MergeRequestState,
             CommitCount = commits?.GetArrayLength() ?? details.FirstProperty("commitCount", "commits_count").IntValue() ?? reference.CommitCount,
-            DiscussionCount = discussions?.GetArrayLength() ?? reference.DiscussionCount
+            DiscussionCount = discussions?.GetArrayLength() ?? reference.DiscussionCount,
+            Url = details.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url
         };
     }
 
@@ -747,7 +765,8 @@ public sealed partial class McpActivityProvider(
                     "GitLab",
                     "Commit",
                     $"Коммит в {reference.Branch}",
-                    commit.FirstProperty("title", "message").StringValue());
+                    commit.FirstProperty("title", "message").StringValue(),
+                    commit.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url);
             }
         }
 
@@ -777,9 +796,22 @@ public sealed partial class McpActivityProvider(
                     "GitLab",
                     "Discussion",
                     $"Обсуждение MR !{reference.MergeRequestIid}",
-                    note.FirstProperty("body", "text").StringValue());
+                    note.FirstProperty("body", "text").StringValue(),
+                    note.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url);
             }
         }
+    }
+
+    private static string? BuildWorkItemUrl(string taskUrl, string workItemId)
+    {
+        if (string.IsNullOrWhiteSpace(taskUrl) || string.IsNullOrWhiteSpace(workItemId) ||
+            workItemId.StartsWith("presence:", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var issueUrl = taskUrl.Split('#', 2)[0];
+        return $"{issueUrl}#focus=WorkItem-{Uri.EscapeDataString(workItemId)}.0-0";
     }
 
     private static DateTimeOffset? ParseTimestamp(JsonElement? value)
@@ -879,7 +911,7 @@ public sealed partial class McpActivityProvider(
         "youtrack_search_issues(query, customFieldsToReturn, offset, limit). " +
         $"Доступные методы: {string.Join(", ", names.Order())}");
 
-    [GeneratedRegex(@"https?://[^/]+/(?<project>[^\s]+?)/-/merge_requests/(?<iid>\d+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<url>https?://[^/]+/(?<project>[^\s]+?)/-/merge_requests/(?<iid>\d+))", RegexOptions.IgnoreCase)]
     private static partial Regex MergeRequestUrlRegex();
 
     private static Regex DurationPartRegex(string suffix) =>

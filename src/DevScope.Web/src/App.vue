@@ -4,7 +4,7 @@ import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
 import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
-import { CalendarDays, ChartNoAxesColumnIncreasing, CheckCircle2, Clock3, Database, GitMerge, RefreshCw, Save, Search, Settings, Sparkles, UserRound } from '@lucide/vue'
+import { CalendarDays, ChartNoAxesColumnIncreasing, CheckCircle2, Clock3, Database, ExternalLink, GitMerge, RefreshCw, Save, Search, Settings, Sparkles, UserRound } from '@lucide/vue'
 import { api } from './services/api'
 import type { ApplicationSettings, CacheRefreshInterval, Employee, LlmModelOption, PeriodSummary, TaskActivity, TaskAnalysis } from './types'
 
@@ -228,10 +228,13 @@ watch(selectedModel, value => {
               <div class="worklogs">
                 <div v-for="worklog in item.worklogs" :key="worklog.id">
                   <span>{{ new Date(worklog.date).toLocaleDateString('ru-RU') }}</span><strong>{{ worklog.type }}</strong><span>{{ summary.hasExactWorklogDurations ? formatDuration(worklog.durationMinutes) : 'есть' }}</span><em>{{ worklog.description }}</em>
+                  <a v-if="worklog.url" class="row-link" :href="worklog.url" target="_blank" rel="noopener noreferrer" title="Открыть это списание в YouTrack"><ExternalLink :size="14" /><span>Открыть</span></a>
                 </div>
               </div>
               <div v-if="item.task.gitLab" class="gitlab-row">
-                <GitMerge :size="17" /><strong>GitLab</strong><span>{{ item.task.gitLab.branch }}</span><span>{{ item.task.gitLab.commitCount }} коммитов</span><span>MR !{{ item.task.gitLab.mergeRequestIid }} · {{ item.task.gitLab.mergeRequestState }}</span>
+                <GitMerge :size="17" /><strong>GitLab</strong><span>{{ item.task.gitLab.branch }}</span><span>{{ item.task.gitLab.commitCount }} коммитов</span>
+                <a v-if="item.task.gitLab.url" class="mr-link" :href="item.task.gitLab.url" target="_blank" rel="noopener noreferrer">MR !{{ item.task.gitLab.mergeRequestIid }} · {{ item.task.gitLab.mergeRequestState }}<ExternalLink :size="14" /></a>
+                <span v-else>MR !{{ item.task.gitLab.mergeRequestIid }} · {{ item.task.gitLab.mergeRequestState }}</span>
               </div>
               <div class="analysis-action">
                 <Button
@@ -268,7 +271,14 @@ watch(selectedModel, value => {
             <div v-for="event in summary.events" :key="event.id" class="timeline-item">
               <span class="dot" :class="event.source.toLowerCase()"></span>
               <time>{{ new Date(event.occurredAt).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) }}</time>
-              <div><span class="source" :class="event.source.toLowerCase()">{{ event.source }}</span><strong>{{ event.title }}</strong><p>{{ event.details }}</p></div>
+              <div class="timeline-content">
+                <div class="timeline-heading">
+                  <span class="source" :class="event.source.toLowerCase()">{{ event.source }}</span>
+                  <a v-if="event.url" :href="event.url" target="_blank" rel="noopener noreferrer"><strong>{{ event.title }}</strong><ExternalLink :size="13" /></a>
+                  <strong v-else>{{ event.title }}</strong>
+                </div>
+                <p v-if="event.details">{{ event.details }}</p>
+              </div>
             </div>
             <div class="verified"><CheckCircle2 :size="18" /><span>Worklog и GitLab отображаются раздельно. GitLab-события не пересчитываются в часы.</span></div>
           </section>

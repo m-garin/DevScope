@@ -13,6 +13,7 @@ export interface Worklog {
   durationMinutes: number
   type: string
   description?: string
+  url?: string
 }
 
 export interface GitLabReference {
@@ -23,6 +24,7 @@ export interface GitLabReference {
   commitCount: number
   linkSource: string
   discussionCount?: number
+  url?: string
 }
 
 export interface TaskActivity {
@@ -48,6 +50,7 @@ export interface ActivityEvent {
   kind: string
   title: string
   details?: string
+  url?: string
 }
 
 export interface PeriodSummary {

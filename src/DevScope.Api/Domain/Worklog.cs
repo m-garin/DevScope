@@ -7,4 +7,5 @@ public sealed record Worklog(
     DateOnly Date,
     int DurationMinutes,
     string Type,
-    string? Description);
+    string? Description,
+    string? Url = null);

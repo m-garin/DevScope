@@ -43,7 +43,7 @@ public sealed class CachedActivityProvider(
                     .Where(worklog => worklog.Date >= from && worklog.Date <= to)
                     .OrderByDescending(worklog => worklog.Date)
                     .ToArray();
-                return worklogs.Length == 0
+                return worklogs.Length == 0 && activity.Task.GitLab?.EmployeeIsReviewer != true
                     ? null
                     : new TaskActivity(
                         activity.Task,
@@ -53,17 +53,21 @@ public sealed class CachedActivityProvider(
             })
             .Where(activity => activity is not null)
             .Cast<TaskActivity>()
-            .OrderByDescending(activity => activity.Worklogs.Max(worklog => worklog.Date))
+            .OrderByDescending(activity => activity.Worklogs.Select(worklog => worklog.Date).DefaultIfEmpty(DateOnly.MinValue).Max())
+            .ThenBy(activity => activity.Task.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var reviewTasks = tasks.Count(activity => activity.Worklogs.Any(worklog =>
             worklog.Type.Contains("ревью", StringComparison.OrdinalIgnoreCase) ||
             worklog.Type.Contains("review", StringComparison.OrdinalIgnoreCase)));
+        var reviewerOnlyTasks = tasks.Count(activity =>
+            activity.Worklogs.Count == 0 && activity.Task.GitLab?.EmployeeIsReviewer == true);
         var narrative = snapshot.Value.Summary.HasExactWorklogDurations
-            ? reviewTasks > 0
-                ? $"Списано время по {tasks.Length} задачам, включая участие в ревью по {reviewTasks}."
-                : $"Списано время по {tasks.Length} задачам."
-            : $"Списания подтверждены по {tasks.Length} задачам в " +
-              $"{tasks.SelectMany(item => item.Worklogs).Select(item => item.Date).Distinct().Count()} дн. выбранного периода.";
+            ? $"Списано время по {tasks.Length - reviewerOnlyTasks} задачам" +
+              (reviewTasks > 0 ? $", включая участие в ревью по {reviewTasks}" : string.Empty) +
+              (reviewerOnlyTasks > 0 ? $"; ещё {reviewerOnlyTasks} открытых задач назначено сотруднику на ревью" : string.Empty) + "."
+            : $"Списания подтверждены по {tasks.Length - reviewerOnlyTasks} задачам в " +
+              $"{tasks.SelectMany(item => item.Worklogs).Select(item => item.Date).Distinct().Count()} дн. выбранного периода." +
+              (reviewerOnlyTasks > 0 ? $" Ещё {reviewerOnlyTasks} открытых задач назначено сотруднику на ревью." : string.Empty);
 
         return new PeriodSummary(
             snapshot.Value.Summary.Employee,

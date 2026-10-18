@@ -92,16 +92,16 @@ function pluralizeCommits(count: number) {
 }
 
 function formatCommitActivity(gitLab: GitLabReference) {
-  if (!gitLab.commitAuthorsKnown) return pluralizeCommits(gitLab.commitCount)
   if (gitLab.commitCount === 0) return 'Коммитов в MR нет'
+  if (!gitLab.commitAuthorsKnown) return `${pluralizeCommits(gitLab.commitCount)} в MR · авторы не определены`
 
   const employeeCount = gitLab.employeeCommitCount ?? 0
   const otherCount = Math.max(0, gitLab.commitCount - employeeCount)
   if (employeeCount > 0 && otherCount > 0) {
     return `${pluralizeCommits(employeeCount)} сотрудника · ${pluralizeCommits(otherCount)} от других авторов`
   }
-  if (employeeCount > 0) return `${pluralizeCommits(employeeCount)} сотрудника`
-  return `${pluralizeCommits(otherCount)} от других авторов`
+  if (employeeCount > 0) return `${pluralizeCommits(employeeCount)} сотрудника в MR`
+  return `${pluralizeCommits(otherCount)} от других авторов в MR`
 }
 
 function formatMergeRequestState(state: string) {
@@ -328,8 +328,9 @@ watch(selectedModel, value => {
                 <span>Оценка на исполнение</span>
                 <strong>{{ formatDuration(item.task.estimateMinutes) }}</strong>
               </div>
-              <div class="worklog-total"><Clock3 :size="18" /><strong>{{ summary.hasExactWorklogDurations ? formatDuration(item.loggedMinutes) : item.worklogs.length }}</strong><span>{{ summary.hasExactWorklogDurations ? 'списал выбранный сотрудник' : 'дн. с подтверждёнными списаниями' }}</span></div>
-              <div class="worklogs">
+              <div v-if="item.worklogs.length" class="worklog-total"><Clock3 :size="18" /><strong>{{ summary.hasExactWorklogDurations ? formatDuration(item.loggedMinutes) : item.worklogs.length }}</strong><span>{{ summary.hasExactWorklogDurations ? 'списал выбранный сотрудник' : 'дн. с подтверждёнными списаниями' }}</span></div>
+              <div v-else class="worklog-total reviewer-only"><UserCheck :size="18" /><span>Назначен ревьюером · списаний в выбранном периоде нет</span></div>
+              <div v-if="item.worklogs.length" class="worklogs">
                 <div class="worklog-header" :class="{ presence: !summary.hasExactWorklogDurations }">
                   <span>Дата</span><span v-if="summary.hasExactWorklogDurations">Тип</span><span v-if="summary.hasExactWorklogDurations">Время</span><span>Подтверждение</span><span></span>
                 </div>

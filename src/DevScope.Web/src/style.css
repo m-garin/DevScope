@@ -63,6 +63,7 @@ h2 { margin: 0; font-size: 19px; }
 .worklog-total { display: flex; align-items: center; gap: 8px; margin: 17px 0 10px; color: #526078; }
 .worklog-total strong { color: #1a2639; font-size: 18px; }
 .worklog-total span { font-size: 12px; }
+.worklog-total.reviewer-only { color: #315f8e; }
 .worklogs { display: grid; gap: 5px; }
 .worklogs > div { display: grid; grid-template-columns: 90px 145px 70px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; background: #f7f9fc; font-size: 12px; }
 .worklogs > div.presence { grid-template-columns: 100px minmax(0, 1fr) auto; }

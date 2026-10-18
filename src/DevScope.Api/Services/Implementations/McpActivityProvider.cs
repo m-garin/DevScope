@@ -196,11 +196,23 @@ public sealed partial class McpActivityProvider(
             _taskCache[$"{employee.Id}:{task.Id}"] = activity;
         }
 
+        var reviewerSearchAvailable = await AddReviewerAssignmentsAsync(
+            taskActivities, gitLabEvents, issueTool, mergeRequestTool,
+            employee, cancellationToken);
+        if (!reviewerSearchAvailable && !string.IsNullOrWhiteSpace(employee.GitLabUsername))
+        {
+            limitations.Add("GitLab MCP не предоставляет глобальный поиск MR по reviewer_username; задачи без списаний, где сотрудник только ревьюер, могут отсутствовать.");
+        }
+
         var ordered = taskActivities
-            .OrderByDescending(activity => activity.Worklogs.Max(worklog => worklog.Date))
+            .OrderByDescending(activity => activity.Worklogs.Select(worklog => worklog.Date).DefaultIfEmpty(DateOnly.MinValue).Max())
+            .ThenBy(activity => activity.Task.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var reviewerOnlyTasks = ordered.Count(item =>
+            item.Worklogs.Count == 0 && item.Task.GitLab?.EmployeeIsReviewer == true);
         var activeDays = ordered.SelectMany(item => item.Worklogs).Select(item => item.Date).Distinct().Count();
-        var narrative = $"Списания подтверждены по {ordered.Length} задачам в {activeDays} дн. выбранного периода.";
+        var narrative = $"Списания подтверждены по {ordered.Length - reviewerOnlyTasks} задачам в {activeDays} дн. выбранного периода." +
+            (reviewerOnlyTasks > 0 ? $" Ещё {reviewerOnlyTasks} открытых задач назначено сотруднику на ревью." : string.Empty);
         var events = ordered
             .SelectMany(activity => activity.Worklogs.Select(worklog => new ActivityEvent(
                 worklog.Id,
@@ -249,8 +261,8 @@ public sealed partial class McpActivityProvider(
             .Where(item => item.Date >= from && item.Date <= to)
             .ToArray();
         var limitations = rawWorkItems.Count > 0 && worklogs.Length == 0
-            ? new[] { "MCP вернул work items, но их формат не удалось распознать." }
-            : Array.Empty<string>();
+            ? new List<string> { "MCP вернул work items, но их формат не удалось распознать." }
+            : [];
         var activities = new List<TaskActivity>();
         var events = new List<ActivityEvent>();
 
@@ -341,9 +353,20 @@ public sealed partial class McpActivityProvider(
             _taskCache[$"{employee.Id}:{task.Id}"] = activity;
         }
 
+        var reviewerSearchAvailable = await AddReviewerAssignmentsAsync(
+            activities, events, issueTool, mergeRequestTool,
+            employee, cancellationToken);
+        if (!reviewerSearchAvailable && !string.IsNullOrWhiteSpace(employee.GitLabUsername))
+        {
+            limitations.Add("GitLab MCP не предоставляет глобальный поиск MR по reviewer_username; задачи без списаний, где сотрудник только ревьюер, могут отсутствовать.");
+        }
+
         var ordered = activities
-            .OrderByDescending(item => item.Worklogs.Max(worklog => worklog.Date))
+            .OrderByDescending(item => item.Worklogs.Select(worklog => worklog.Date).DefaultIfEmpty(DateOnly.MinValue).Max())
+            .ThenBy(item => item.Task.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var reviewerOnlyTasks = ordered.Count(item =>
+            item.Worklogs.Count == 0 && item.Task.GitLab?.EmployeeIsReviewer == true);
         return new PeriodSummary(
             employee,
             from,
@@ -351,7 +374,9 @@ public sealed partial class McpActivityProvider(
             worklogs.Sum(item => item.DurationMinutes),
             ordered.Length,
             ordered.Count(item => item.Task.GitLab is not null),
-            $"Списано время по {ordered.Length} задачам.",
+            reviewerOnlyTasks > 0
+                ? $"Списано время по {ordered.Length - reviewerOnlyTasks} задачам; ещё {reviewerOnlyTasks} открытых задач назначено сотруднику на ревью."
+                : $"Списано время по {ordered.Length} задачам.",
             ordered,
             events.OrderByDescending(item => item.OccurredAt).ToArray(),
             limitations);
@@ -707,6 +732,254 @@ public sealed partial class McpActivityProvider(
         return null;
     }
 
+    private async Task<bool> AddReviewerAssignmentsAsync(
+        List<TaskActivity> activities,
+        List<ActivityEvent> events,
+        string? issueTool,
+        string? mergeRequestTool,
+        Employee employee,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(employee.GitLabUsername))
+        {
+            return false;
+        }
+
+        var listTool = await ResolveReviewerMergeRequestListToolAsync(cancellationToken);
+        if (listTool is null)
+        {
+            return false;
+        }
+
+        var knownProjectPaths = activities
+            .Select(activity => activity.Task.GitLab?.ProjectPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var assignments = await ReadReviewerMergeRequestsAsync(
+            listTool, employee, knownProjectPaths, cancellationToken);
+        foreach (var assignment in assignments)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var existingIndex = activities.FindIndex(activity =>
+                activity.Task.Id.Equals(assignment.TaskId, StringComparison.OrdinalIgnoreCase));
+            if (existingIndex >= 0)
+            {
+                var existing = activities[existingIndex];
+                var gitLab = existing.Task.GitLab;
+                if (gitLab is not null &&
+                    gitLab.MergeRequestIid == assignment.Reference.MergeRequestIid &&
+                    gitLab.ProjectPath.Equals(assignment.Reference.ProjectPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    var updated = existing with
+                    {
+                        Task = existing.Task with
+                        {
+                            GitLab = gitLab with { EmployeeIsReviewer = true }
+                        }
+                    };
+                    activities[existingIndex] = updated;
+                    _taskCache[$"{employee.Id}:{updated.Task.Id}"] = updated;
+                }
+                continue;
+            }
+
+            WorkTask? task = null;
+            if (issueTool is not null)
+            {
+                var issue = await mcp.CallToolAsync(
+                    YouTrackServer,
+                    issueTool,
+                    new Dictionary<string, object?> { ["issueId"] = assignment.TaskId },
+                    cancellationToken);
+                task = ParseIssue(issue, employee);
+            }
+            task ??= new WorkTask(
+                assignment.TaskId,
+                assignment.Title ?? assignment.TaskId,
+                "Назначено ревью",
+                null,
+                null,
+                string.Empty,
+                null);
+
+            var gitLabReference = assignment.Reference;
+            if (mergeRequestTool is not null)
+            {
+                var details = await mcp.CallToolAsync(
+                    GitLabServer,
+                    mergeRequestTool,
+                    new Dictionary<string, object?>
+                    {
+                        ["project_id"] = gitLabReference.ProjectPath,
+                        ["mr_iid"] = gitLabReference.MergeRequestIid,
+                        ["include_changes"] = false,
+                        ["include_commits"] = true,
+                        ["include_discussions"] = true
+                    },
+                    cancellationToken);
+                gitLabReference = EnrichGitLabReference(gitLabReference, details, employee) with
+                {
+                    EmployeeIsReviewer = true
+                };
+                events.AddRange(ParseGitLabEvents(details, task.Id, employee, gitLabReference));
+            }
+
+            task = task with { GitLab = EnsureMergeRequestUrl(gitLabReference) };
+            var activity = new TaskActivity(task, 0, [], IsEmployeeDeveloper(task.DeveloperId, employee));
+            activities.Add(activity);
+            _taskCache[$"{employee.Id}:{task.Id}"] = activity;
+        }
+        return true;
+    }
+
+    private async Task<McpToolInfo?> ResolveReviewerMergeRequestListToolAsync(CancellationToken cancellationToken)
+    {
+        var servers = await mcp.GetServerNamesAsync(cancellationToken);
+        if (!servers.Contains(GitLabServer, StringComparer.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var tools = await mcp.ListToolsAsync(GitLabServer, cancellationToken);
+        return tools.FirstOrDefault(tool =>
+        {
+            if (!MergeRequestListToolCandidates.Contains(tool.Name, StringComparer.OrdinalIgnoreCase) ||
+                tool.InputSchema.FirstProperty("properties") is not { ValueKind: JsonValueKind.Object } properties ||
+                properties.FirstProperty("reviewer_username", "reviewerUsername") is null)
+            {
+                return false;
+            }
+
+            return true;
+        });
+    }
+
+    private async Task<IReadOnlyList<ReviewerMergeRequest>> ReadReviewerMergeRequestsAsync(
+        McpToolInfo tool,
+        Employee employee,
+        IReadOnlyList<string> knownProjectPaths,
+        CancellationToken cancellationToken)
+    {
+        var properties = tool.InputSchema.FirstProperty("properties")!.Value;
+        var results = new List<ReviewerMergeRequest>();
+        var required = tool.InputSchema.FindArray("required");
+        var projectIsRequired = required is not null && required.Value.EnumerateArray().Any(item =>
+            ((JsonElement?)item).StringValue()?.Equals("project_id", StringComparison.OrdinalIgnoreCase) == true);
+        var projects = projectIsRequired
+            ? knownProjectPaths.Cast<string?>().ToArray()
+            : new string?[] { null };
+        foreach (var projectPath in projects)
+        {
+            var page = 1;
+            while (page <= 10)
+            {
+                var arguments = new Dictionary<string, object?>();
+                if (projectPath is not null)
+                {
+                    AddSupportedArgument(arguments, properties, "project_id", projectPath);
+                    AddSupportedArgument(arguments, properties, "projectId", projectPath);
+                }
+                AddSupportedArgument(arguments, properties, "reviewer_username", employee.GitLabUsername);
+                AddSupportedArgument(arguments, properties, "reviewerUsername", employee.GitLabUsername);
+                AddSupportedArgument(arguments, properties, "scope", "all");
+                AddSupportedArgument(arguments, properties, "state", "opened");
+                AddSupportedArgument(arguments, properties, "page", page);
+                AddSupportedArgument(arguments, properties, "per_page", 100);
+                AddSupportedArgument(arguments, properties, "perPage", 100);
+
+                var payload = await mcp.CallToolAsync(
+                    GitLabServer, tool.Name, arguments, cancellationToken);
+                var mergeRequests = payload.FindArray("merge_requests", "mergeRequests", "items", "data");
+                if (mergeRequests is null)
+                {
+                    break;
+                }
+
+                var items = mergeRequests.Value.EnumerateArray().ToArray();
+                foreach (var item in items)
+                {
+                    var iid = item.FirstProperty("iid").IntValue();
+                    var title = item.FirstProperty("title").StringValue();
+                    var branch = item.FirstProperty("source_branch", "sourceBranch").StringValue() ?? string.Empty;
+                    var taskId = ExtractTaskId($"{title} {branch}");
+                    var url = item.FirstProperty("web_url", "webUrl", "url").StringValue();
+                    var itemProjectPath = item.FirstProperty("project_path", "projectPath", "path_with_namespace").StringValue()
+                        ?? ProjectPathFromMergeRequestUrl(url)
+                        ?? projectPath;
+                    if (iid is null || string.IsNullOrWhiteSpace(taskId) || string.IsNullOrWhiteSpace(itemProjectPath))
+                    {
+                        continue;
+                    }
+
+                    results.Add(new ReviewerMergeRequest(
+                        taskId,
+                        title,
+                        new GitLabReference(
+                            itemProjectPath,
+                            branch,
+                            iid.Value,
+                            item.FirstProperty("state").StringValue() ?? "opened",
+                            item.FirstProperty("commit_count", "commitCount", "commits_count").IntValue() ?? 0,
+                            "reviewer",
+                            Url: url,
+                            EmployeeIsReviewer: true)));
+                }
+
+                var hasNext = payload.FirstProperty("hasNextPage", "has_more", "hasMore") is { ValueKind: JsonValueKind.True };
+                if (!hasNext || items.Length == 0)
+                {
+                    break;
+                }
+                page++;
+            }
+        }
+
+        return results
+            .GroupBy(item => $"{item.Reference.ProjectPath}!{item.Reference.MergeRequestIid}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private static void AddSupportedArgument(
+        IDictionary<string, object?> arguments,
+        JsonElement properties,
+        string name,
+        object value)
+    {
+        if (properties.FirstProperty(name) is not null)
+        {
+            arguments[name] = value;
+        }
+    }
+
+    private string? ExtractTaskId(string value)
+    {
+        var match = Regex.Match(
+            value,
+            $@"\b{Regex.Escape(options.Value.ProjectKey)}-\d+\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success ? match.Value.ToUpperInvariant() : null;
+    }
+
+    private static string? ProjectPathFromMergeRequestUrl(string? url)
+    {
+        if (!TryAbsoluteHttpUri(url, out var uri))
+        {
+            return null;
+        }
+        var marker = "/-/merge_requests/";
+        var path = Uri.UnescapeDataString(uri.AbsolutePath);
+        var markerIndex = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        return markerIndex > 0 ? path[..markerIndex].Trim('/') : null;
+    }
+
+    private sealed record ReviewerMergeRequest(
+        string TaskId,
+        string? Title,
+        GitLabReference Reference);
+
     private static string? FindRepository(JsonElement issue)
     {
         if (issue.FirstProperty("customFields") is not { ValueKind: JsonValueKind.Object } fields)
@@ -826,7 +1099,7 @@ public sealed partial class McpActivityProvider(
             EmployeeApproved = IsEmployeeListedAsApprover(details, employee) || employeeNotes.Any(IsApprovalNote),
             EmployeeCommentCount = employeeNotes.Count(note => !IsApprovalNote(note) && !IsSystemNote(note)),
             EmployeeCommitCount = employeeCommitCount,
-            EmployeeIsReviewer = IsEmployeeListedAsReviewer(details, employee),
+            EmployeeIsReviewer = reference.EmployeeIsReviewer || IsEmployeeListedAsReviewer(details, employee),
             CommitAuthorsKnown = commits is not null,
             OtherCommitAuthors = otherCommitAuthors
         };
@@ -1129,7 +1402,10 @@ public sealed partial class McpActivityProvider(
     {
         var mergeRequest = FindMergeRequestDetails(details);
         return IsEmployeeInUserArray(details, employee, "reviewers", "assigned_reviewers", "assignedReviewers") ||
-               IsEmployeeInUserArray(mergeRequest, employee, "reviewers", "assigned_reviewers", "assignedReviewers");
+               IsEmployeeInUserArray(mergeRequest, employee, "reviewers", "assigned_reviewers", "assignedReviewers") ||
+               IsEmployeeInUserProperty(details, employee, "reviewer", "assigned_reviewer", "assignedReviewer") ||
+               IsEmployeeInUserProperty(mergeRequest, employee, "reviewer", "assigned_reviewer", "assignedReviewer") ||
+               EnumerateDiscussionNotes(details).Any(note => IsReviewerAssignmentNote(note, employee));
     }
 
     private static bool IsEmployeeInUserArray(JsonElement details, Employee employee, params string[] propertyNames)
@@ -1143,9 +1419,63 @@ public sealed partial class McpActivityProvider(
         return users.EnumerateArray().Any(item =>
         {
             var user = item.FirstProperty("user") is { ValueKind: JsonValueKind.Object } nested ? nested : item;
-            var username = user.FirstProperty("username", "user_name", "login").StringValue();
-            return GitLabIdentityEquals(username, employee.GitLabUsername);
+            return IsEmployeeGitLabUser(user, employee);
         });
+    }
+
+    private static bool IsEmployeeInUserProperty(JsonElement details, Employee employee, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (details.FirstProperty(propertyName) is not { ValueKind: JsonValueKind.Object } user)
+            {
+                continue;
+            }
+            if (user.FirstProperty("user") is { ValueKind: JsonValueKind.Object } nested)
+            {
+                user = nested;
+            }
+            if (IsEmployeeGitLabUser(user, employee))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsEmployeeGitLabUser(JsonElement user, Employee employee)
+    {
+        var username = user.FirstProperty("username", "user_name", "login").StringValue();
+        if (GitLabIdentityEquals(username, employee.GitLabUsername))
+        {
+            return true;
+        }
+
+        var name = user.FirstProperty("name", "display_name", "displayName").StringValue();
+        return !string.IsNullOrWhiteSpace(name) &&
+               name.Trim().Equals(employee.DisplayName.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsReviewerAssignmentNote(JsonElement note, Employee employee)
+    {
+        if (!IsSystemNote(note))
+        {
+            return false;
+        }
+
+        var body = note.FirstProperty("body", "text").StringValue();
+        if (string.IsNullOrWhiteSpace(body) ||
+            (!body.Contains("requested review from", StringComparison.OrdinalIgnoreCase) &&
+             !body.Contains("assigned reviewer", StringComparison.OrdinalIgnoreCase) &&
+             !(body.Contains("ревью", StringComparison.OrdinalIgnoreCase) &&
+               body.Contains("назнач", StringComparison.OrdinalIgnoreCase))))
+        {
+            return false;
+        }
+
+        return (!string.IsNullOrWhiteSpace(employee.GitLabUsername) &&
+                body.Contains(employee.GitLabUsername, StringComparison.OrdinalIgnoreCase)) ||
+               body.Contains(employee.DisplayName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool GitLabIdentityEquals(string? actual, string? expected) =>

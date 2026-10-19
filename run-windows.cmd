@@ -45,16 +45,23 @@ docker compose -f compose.yaml -f compose.windows.yaml --env-file .env.real up -
 if errorlevel 1 goto :failed
 
 echo Waiting up to 120 seconds for PostgreSQL...
+setlocal EnableDelayedExpansion
 set /a ATTEMPT=0
 :wait_postgres
 set /a ATTEMPT+=1
 set "POSTGRES_ID="
 for /f %%I in ('docker compose -f compose.yaml -f compose.windows.yaml --env-file .env.real ps -q postgres') do set "POSTGRES_ID=%%I"
 set "POSTGRES_HEALTH="
-if defined POSTGRES_ID for /f %%I in ('docker inspect --format "{{.State.Health.Status}}" %POSTGRES_ID% 2^>nul') do set "POSTGRES_HEALTH=%%I"
-if /i "%POSTGRES_HEALTH%"=="healthy" goto :build_web
-if %ATTEMPT% GEQ 60 (
+if defined POSTGRES_ID for /f %%I in ('docker inspect --format "{{.State.Health.Status}}" !POSTGRES_ID! 2^>nul') do set "POSTGRES_HEALTH=%%I"
+if not defined POSTGRES_HEALTH set "POSTGRES_HEALTH=container not found"
+echo PostgreSQL health: !POSTGRES_HEALTH! ^(attempt !ATTEMPT!/60^)
+if /i "!POSTGRES_HEALTH!"=="healthy" (
+  endlocal
+  goto :build_web
+)
+if !ATTEMPT! GEQ 60 (
   echo ERROR: PostgreSQL did not become healthy in 120 seconds.
+  endlocal
   goto :failed
 )
 ping 127.0.0.1 -n 3 >nul

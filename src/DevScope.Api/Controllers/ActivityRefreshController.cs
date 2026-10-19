@@ -36,4 +36,11 @@ public sealed class ActivityRefreshController(
         await refreshService.RefreshAllAsync(cancellationToken);
         return Ok(await settingsService.GetAsync(cancellationToken));
     }
+
+    [HttpPost("clear")]
+    public async Task<IActionResult> Clear(CancellationToken cancellationToken)
+    {
+        var clearedReports = await refreshService.ClearCacheAsync(cancellationToken);
+        return Ok(new { clearedReports });
+    }
 }

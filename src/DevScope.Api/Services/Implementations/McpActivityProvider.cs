@@ -33,6 +33,8 @@ public sealed partial class McpActivityProvider(
     public Task<IReadOnlyList<Employee>> GetEmployeesAsync(CancellationToken cancellationToken) =>
         teamDirectory.GetEmployeesAsync(cancellationToken);
 
+    public void ClearMemoryCache() => _taskCache.Clear();
+
     public async Task<PeriodSummary?> GetPeriodSummaryAsync(
         string employeeId,
         DateOnly from,

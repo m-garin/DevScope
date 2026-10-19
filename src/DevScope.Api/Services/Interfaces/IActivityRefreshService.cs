@@ -8,4 +8,5 @@ public interface IActivityRefreshService
         DateOnly to,
         CancellationToken cancellationToken);
     Task RefreshAllAsync(CancellationToken cancellationToken);
+    Task<int> ClearCacheAsync(CancellationToken cancellationToken);
 }

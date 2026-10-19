@@ -3,6 +3,13 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d "%~dp0"
 
+set "CLEAR_CACHE=0"
+if /i "%~1"=="--clear-cache" set "CLEAR_CACHE=1"
+if not "%~1"=="" if /i not "%~1"=="--clear-cache" if /i not "%~1"=="--check" (
+  echo ERROR: Unknown option "%~1". Use --check or --clear-cache.
+  exit /b 1
+)
+
 echo [1/7] Checking required files...
 if not exist ".env.real" (
   echo ERROR: .env.real was not found in %CD%
@@ -81,13 +88,21 @@ set /a ATTEMPT=0
 :wait_api
 set /a ATTEMPT+=1
 curl.exe --fail --silent http://127.0.0.1:8080/api/health >nul 2>&1
-if not errorlevel 1 goto :verify
+if not errorlevel 1 goto :after_api_ready
 if !ATTEMPT! GEQ 60 (
   echo ERROR: DevScope HTTP API did not become ready in 120 seconds.
   goto :failed
 )
 ping 127.0.0.1 -n 3 >nul
 goto :wait_api
+
+:after_api_ready
+if "%CLEAR_CACHE%"=="1" (
+  echo Clearing cached activity reports while preserving settings and the PostgreSQL volume...
+  curl.exe --fail --silent --show-error --request POST http://127.0.0.1:8080/api/activity/refresh/clear
+  if errorlevel 1 goto :failed
+  echo.
+)
 
 :verify
 echo [7/7] Checking the real MCP connections...

@@ -78,6 +78,22 @@ public sealed class ActivityRefreshService(
         }
     }
 
+    public async Task<int> ClearCacheAsync(CancellationToken cancellationToken)
+    {
+        await RefreshLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var database = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var deleted = await database.CachedReports.ExecuteDeleteAsync(cancellationToken);
+            source.ClearMemoryCache();
+            return deleted;
+        }
+        finally
+        {
+            RefreshLock.Release();
+        }
+    }
+
     internal static string CacheKey(string employeeId, DateOnly from, DateOnly to) =>
         $"activity:{employeeId}:{from:yyyy-MM-dd}:{to:yyyy-MM-dd}";
 

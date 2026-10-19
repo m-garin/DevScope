@@ -12,4 +12,6 @@ public sealed class MockActivityRefreshService : IActivityRefreshService
         Task.FromResult<DateTimeOffset?>(DateTimeOffset.UtcNow);
 
     public Task RefreshAllAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task<int> ClearCacheAsync(CancellationToken cancellationToken) => Task.FromResult(0);
 }

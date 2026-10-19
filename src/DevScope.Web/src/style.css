@@ -72,17 +72,26 @@ h2 { margin: 0; font-size: 19px; }
 .worklogs em { min-width: 0; color: #69758a; font-style: normal; overflow-wrap: anywhere; }
 .row-link, .mr-link { display: inline-flex; align-items: center; gap: 5px; color: #1468d4; font-weight: 650; text-decoration: none; }
 .row-link:hover, .mr-link:hover, .timeline-heading a:hover { text-decoration: underline; }
-.gitlab-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 17px; margin-top: 13px; padding: 10px 12px; color: #68518d; background: #faf5ff; border-radius: 8px; font-size: 12px; }
-.gitlab-row .branch { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gitlab-row .commit-authors { color: #8a7a9b; font-size: 11px; }
+.gitlab-row { display: grid; gap: 10px; margin-top: 14px; padding: 13px 14px; color: #5f4b79; background: #faf7ff; border: 1px solid #ece3f7; border-radius: 10px; font-size: 12px; }
+.gitlab-header, .gitlab-identity, .gitlab-overview, .gitlab-signals { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.gitlab-header { justify-content: space-between; gap: 12px; }
+.gitlab-identity { min-width: 0; }
+.gitlab-icon { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; color: #7048a4; background: #eee5fa; border-radius: 8px; }
+.gitlab-row .branch { min-width: 0; max-width: 360px; padding-left: 8px; color: #87789a; border-left: 1px solid #ded2eb; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gitlab-overview { gap: 7px; }
+.gitlab-commit-summary, .gitlab-row .mr-state { padding: 5px 8px; background: rgba(255, 255, 255, .75); border: 1px solid #ebe3f3; border-radius: 7px; }
 .gitlab-row .mr-state { color: #59456f; font-weight: 650; }
-.gitlab-row .mr-link { margin-left: auto; padding: 6px 9px; color: #fff; background: #7252a0; border-radius: 7px; }
+.gitlab-row .commit-authors { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; color: #8a7a9b; font-size: 11px; }
+.gitlab-row .commit-authors span { font-weight: 700; }
+.gitlab-row .commit-authors strong { min-width: 0; color: #766588; font-weight: 500; overflow-wrap: anywhere; }
+.gitlab-row .mr-link { flex: 0 0 auto; padding: 7px 10px; color: #fff; background: #7252a0; border-radius: 8px; }
 .gitlab-row .mr-link:hover { background: #604388; text-decoration: none; }
-.gitlab-signal { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; color: #5a4776; background: #eee6f8; border-radius: 14px; font-weight: 650; }
+.gitlab-signals:empty { display: none; }
+.gitlab-signal { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; color: #5a4776; background: #eee6f8; border-radius: 14px; font-weight: 650; }
 .gitlab-signal.reviewer { color: #315f8e; background: #e5f0fb; }
 .gitlab-signal.approved { color: #2d6b42; background: #e4f4e9; }
-.gitlab-no-action { color: #857592; font-size: 11px; }
-.mr-unavailable { margin-left: auto; color: #857592; font-size: 11px; }
+.gitlab-no-action { width: fit-content; padding: 5px 8px; color: #756981; background: #f1edf5; border-radius: 7px; font-size: 11px; }
+.mr-unavailable { color: #857592; font-size: 11px; }
 .analysis-action { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
 .analysis-action .p-button { display: inline-flex; gap: 7px; }
 .analysis-action small { color: #8490a3; }
@@ -102,15 +111,16 @@ h2 { margin: 0; font-size: 19px; }
 .timeline-filters button { padding: 6px 10px; color: #5e6b80; background: #f4f6fa; border: 1px solid transparent; border-radius: 16px; font: inherit; font-size: 12px; cursor: pointer; }
 .timeline-filters button:hover { background: #eaf0f8; }
 .timeline-filters button.active { color: #1468d4; background: #eaf2ff; border-color: #cfe0f8; font-weight: 700; }
-.timeline-item { position: relative; display: grid; grid-template-columns: 10px 84px minmax(0, 1fr); align-items: start; gap: 8px; padding: 14px 0 14px 8px; border-top: 1px solid #edf0f5; }
+.timeline-item { position: relative; display: grid; grid-template-columns: 10px minmax(0, 1fr); align-items: start; gap: 10px; padding: 14px 2px; border-top: 1px solid #edf0f5; }
 .dot { width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: #1769e0; }
 .dot.gitlab { background: #e96521; }
-.timeline time { min-width: 0; color: #768196; font-size: 12px; line-height: 1.35; padding-top: 3px; }
 .timeline-content { min-width: 0; display: grid; gap: 7px; }
+.timeline-meta { display: flex; align-items: center; gap: 7px; }
+.timeline time { min-width: 0; color: #768196; font-size: 11px; line-height: 1.35; }
 .timeline-heading { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .timeline-heading a { min-width: 0; display: inline-flex; align-items: center; gap: 5px; color: inherit; }
 .timeline-heading strong { min-width: 0; overflow-wrap: anywhere; }
-.timeline-item strong { font-size: 13px; }
+.timeline-item strong { font-size: 13px; line-height: 1.4; }
 .timeline-item p { min-width: 0; margin: 0; color: #5f6e83; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
 .timeline-item p.clamped { display: -webkit-box; overflow: hidden; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .details-toggle { display: inline-flex; align-items: center; gap: 3px; width: fit-content; padding: 0; color: #1468d4; background: transparent; border: 0; font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
@@ -119,7 +129,7 @@ h2 { margin: 0; font-size: 19px; }
 .timeline-empty { padding: 26px 10px; color: #748096; border-top: 1px solid #edf0f5; text-align: center; font-size: 13px; }
 .show-more { display: block; width: 100%; margin-top: 8px; padding: 9px; color: #1468d4; background: #f5f8fd; border: 1px solid #dce7f6; border-radius: 8px; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
 .show-more:hover { background: #eaf2ff; }
-.source { width: fit-content; padding: 3px 8px; border-radius: 20px; color: #1468d4; background: #e9f2ff; font-size: 11px; font-weight: 700; }
+.source { width: fit-content; padding: 2px 7px; border-radius: 20px; color: #1468d4; background: #e9f2ff; font-size: 10px; font-weight: 700; }
 .source.gitlab { color: #c24f13; background: #fff0e8; }
 .verified { display: flex; gap: 9px; margin-top: 18px; padding: 12px; border-radius: 9px; color: #4e6b58; background: #eef8f1; font-size: 12px; line-height: 1.45; }
 .error { margin: 15px 0; padding: 13px; color: #a22b2b; background: #fff0f0; border: 1px solid #ffd0d0; border-radius: 9px; }
@@ -136,5 +146,5 @@ h2 { margin: 0; font-size: 19px; }
 .settings-card .p-button { align-self: flex-start; display: inline-flex; gap: 7px; }
 .settings-save { display: flex; justify-content: flex-end; margin-top: 16px; }
 .settings-save .p-button { display: inline-flex; gap: 7px; }
-@media (max-width: 1250px) { .summary { grid-template-columns: minmax(360px, 2fr) repeat(4, 1fr); } .metric { padding: 7px 11px; } .columns { grid-template-columns: minmax(620px, 1.7fr) minmax(340px, .8fr); } }
+@media (max-width: 1350px) { .summary { grid-template-columns: minmax(360px, 2fr) repeat(4, 1fr); } .metric { padding: 7px 11px; } .columns { grid-template-columns: 1fr; } }
 

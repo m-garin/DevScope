@@ -349,18 +349,25 @@ watch(selectedModel, value => {
                 </div>
               </div>
               <div v-if="item.task.gitLab" class="gitlab-row">
-                <GitMerge :size="17" /><strong>GitLab</strong><span v-if="item.task.gitLab.branch" class="branch">{{ item.task.gitLab.branch }}</span><span>{{ formatCommitActivity(item.task.gitLab) }}</span>
-                <span v-if="item.task.gitLab.commitAuthorsKnown && item.task.gitLab.otherCommitAuthors?.length" class="commit-authors">{{ item.task.gitLab.otherCommitAuthors.join(', ') }}</span>
-                <span class="mr-state">MR !{{ item.task.gitLab.mergeRequestIid }}<template v-if="formatMergeRequestState(item.task.gitLab.mergeRequestState)"> · Статус MR: {{ formatMergeRequestState(item.task.gitLab.mergeRequestState) }}</template></span>
-                <span v-if="item.task.gitLab.employeeIsReviewer" class="gitlab-signal reviewer"><UserCheck :size="14" />Сотрудник — ревьюер MR</span>
-                <span v-if="item.task.gitLab.employeeCreatedMergeRequest" class="gitlab-signal">Создал MR</span>
-                <span v-if="item.task.gitLab.employeeMergedMergeRequest" class="gitlab-signal approved"><CheckCircle2 :size="14" />Слил MR</span>
-                <span v-if="item.task.gitLab.employeeApproved" class="gitlab-signal approved"><CheckCircle2 :size="14" />Аппрув сотрудника</span>
-                <span v-if="item.task.gitLab.employeeCommentCount" class="gitlab-signal">Комментариев сотрудника: {{ item.task.gitLab.employeeCommentCount }}</span>
-                <span v-if="item.task.gitLab.employeeResolvedThreads" class="gitlab-signal">Разрешил треды</span>
+                <div class="gitlab-header">
+                  <div class="gitlab-identity"><span class="gitlab-icon"><GitMerge :size="17" /></span><strong>GitLab</strong><span v-if="item.task.gitLab.branch" class="branch" :title="item.task.gitLab.branch">{{ item.task.gitLab.branch }}</span></div>
+                  <a v-if="item.task.gitLab.url" class="mr-link" :href="item.task.gitLab.url" target="_blank" rel="noopener noreferrer">MR !{{ item.task.gitLab.mergeRequestIid }}<ExternalLink :size="14" /></a>
+                  <span v-else class="mr-unavailable">Ссылка на MR недоступна</span>
+                </div>
+                <div class="gitlab-overview">
+                  <span class="gitlab-commit-summary">{{ formatCommitActivity(item.task.gitLab) }}</span>
+                  <span class="mr-state">Статус: {{ formatMergeRequestState(item.task.gitLab.mergeRequestState) || item.task.gitLab.mergeRequestState }}</span>
+                </div>
+                <div v-if="item.task.gitLab.commitAuthorsKnown && item.task.gitLab.otherCommitAuthors?.length" class="commit-authors"><span>Другие авторы</span><strong>{{ item.task.gitLab.otherCommitAuthors.join(', ') }}</strong></div>
+                <div class="gitlab-signals">
+                  <span v-if="item.task.gitLab.employeeIsReviewer" class="gitlab-signal reviewer"><UserCheck :size="14" />Ревьюер MR</span>
+                  <span v-if="item.task.gitLab.employeeCreatedMergeRequest" class="gitlab-signal">Создал MR</span>
+                  <span v-if="item.task.gitLab.employeeMergedMergeRequest" class="gitlab-signal approved"><CheckCircle2 :size="14" />Слил MR</span>
+                  <span v-if="item.task.gitLab.employeeApproved" class="gitlab-signal approved"><CheckCircle2 :size="14" />Поставил аппрув</span>
+                  <span v-if="item.task.gitLab.employeeCommentCount" class="gitlab-signal">Комментарии: {{ item.task.gitLab.employeeCommentCount }}</span>
+                  <span v-if="item.task.gitLab.employeeResolvedThreads" class="gitlab-signal">Разрешил треды</span>
+                </div>
                 <span v-if="item.task.gitLab.employeeActionFactsKnown && !hasConfirmedGitLabAction(item.task.gitLab)" class="gitlab-no-action">Подтверждённых действий сотрудника в MR не найдено</span>
-                <a v-if="item.task.gitLab.url" class="mr-link" :href="item.task.gitLab.url" target="_blank" rel="noopener noreferrer">Открыть MR !{{ item.task.gitLab.mergeRequestIid }}<ExternalLink :size="14" /></a>
-                <span v-else class="mr-unavailable">Ссылка на MR не получена от MCP</span>
               </div>
               <div class="analysis-action">
                 <Button
@@ -402,10 +409,9 @@ watch(selectedModel, value => {
             <div v-if="visibleTimelineEvents.length === 0" class="timeline-empty">Нет событий выбранного источника.</div>
             <div v-for="event in visibleTimelineEvents" :key="event.id" class="timeline-item">
               <span class="dot" :class="event.source.toLowerCase()"></span>
-              <time>{{ formatEventTime(event.occurredAt, event.kind) }}</time>
               <div class="timeline-content">
+                <div class="timeline-meta"><time>{{ formatEventTime(event.occurredAt, event.kind) }}</time><span class="source" :class="event.source.toLowerCase()">{{ event.source }}</span></div>
                 <div class="timeline-heading">
-                  <span class="source" :class="event.source.toLowerCase()">{{ event.source }}</span>
                   <a v-if="event.url" :href="event.url" target="_blank" rel="noopener noreferrer"><strong>{{ event.title }}</strong><ExternalLink :size="13" /></a>
                   <strong v-else>{{ event.title }}</strong>
                 </div>

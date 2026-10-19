@@ -35,6 +35,7 @@ const timelineSource = ref<'All' | 'YouTrack' | 'GitLab'>('All')
 const expandedTimelineEvents = ref<Record<string, boolean>>({})
 const expandedTaskWorklogs = ref<Record<string, boolean>>({})
 const showAllTimelineEvents = ref(false)
+const showReviewQueue = ref(false)
 const collapsedWorklogLimit = 3
 
 const refreshIntervalOptions = [
@@ -47,6 +48,7 @@ const selectedEmployeeDetails = computed(() => employees.value.find(item => item
 const totalHours = computed(() => summary.value ? formatDuration(summary.value.loggedMinutes) : '0 ч')
 const activeDays = computed(() => new Set(summary.value?.tasks.flatMap(task => task.worklogs.map(item => item.date)) ?? []).size)
 const worklogPresenceCount = computed(() => summary.value?.tasks.reduce((sum, task) => sum + task.worklogs.length, 0) ?? 0)
+const currentReviewAssignments = computed(() => summary.value?.currentReviewAssignments ?? [])
 const reviewHours = computed(() => {
   const minutes = summary.value?.tasks.flatMap(task => task.worklogs)
     .filter(worklog => worklog.type.toLocaleLowerCase().includes('ревью'))
@@ -91,6 +93,14 @@ function pluralizeCommits(count: number) {
   if (mod10 === 1) return `${count} коммит`
   if (mod10 >= 2 && mod10 <= 4) return `${count} коммита`
   return `${count} коммитов`
+}
+
+function reviewQueueLabel(count: number) {
+  const mod100 = count % 100
+  const mod10 = count % 10
+  if (mod100 >= 11 && mod100 <= 14) return `${count} открытых MR`
+  if (mod10 === 1) return `${count} открытый MR`
+  return `${count} открытых MR`
 }
 
 function formatCommitActivity(gitLab: GitLabReference) {
@@ -184,6 +194,7 @@ async function load() {
   expandedTimelineEvents.value = {}
   expandedTaskWorklogs.value = {}
   showAllTimelineEvents.value = false
+  showReviewQueue.value = false
   try {
     summary.value = await api.activity(selectedEmployee.value, toIsoDate(dates.value[0]), toIsoDate(dates.value[1]))
   } catch (exception) {
@@ -286,6 +297,7 @@ watch(selectedModel, value => {
     </aside>
 
     <main>
+      <div class="sticky-top">
       <header>
         <div>
           <p class="eyebrow">Fintender · Обзор деятельности</p>
@@ -296,13 +308,14 @@ watch(selectedModel, value => {
         </div>
       </header>
 
-      <template v-if="activePage === 'activity'">
-      <section class="filters card">
+      <section v-if="activePage === 'activity'" class="filters card">
         <label><span>Сотрудник</span><Select v-model="selectedEmployee" :options="employeeOptions" optionLabel="label" optionValue="value" @change="changeEmployee" /></label>
         <label><span>Период</span><DatePicker v-model="dates" selectionMode="range" dateFormat="dd.mm.yy" :manualInput="false" showIcon /></label>
         <div class="quick"><Button label="Прошлая неделя" severity="secondary" outlined @click="setPreviousWeek" /><Button label="Эта неделя" severity="secondary" outlined @click="setThisWeek" /></div>
       </section>
+      </div>
 
+      <template v-if="activePage === 'activity'">
       <div v-if="error" class="error">{{ error }}</div>
       <template v-if="loading">
         <Skeleton height="9rem" borderRadius="12px" />
@@ -328,9 +341,36 @@ watch(selectedModel, value => {
           </div>
         </div>
 
+        <section class="review-queue card">
+          <div class="review-queue-summary">
+            <div class="review-queue-title">
+              <span class="review-queue-icon"><UserCheck :size="19" /></span>
+              <div><h2>Сейчас ожидают ревью</h2><small>Текущее состояние открытых MR, не относится к выбранному периоду</small></div>
+            </div>
+            <div class="review-queue-actions">
+              <strong>{{ reviewQueueLabel(currentReviewAssignments.length) }}</strong>
+              <button v-if="currentReviewAssignments.length" class="review-queue-toggle" :aria-expanded="showReviewQueue" @click="showReviewQueue = !showReviewQueue">
+                {{ showReviewQueue ? 'Скрыть' : 'Подробнее' }}
+                <ChevronDown :size="15" :class="{ rotated: showReviewQueue }" />
+              </button>
+            </div>
+          </div>
+          <div v-if="showReviewQueue" class="review-queue-details">
+            <div v-for="item in currentReviewAssignments" :key="`${item.task.id}:${item.task.gitLab?.mergeRequestIid ?? 0}`" class="review-queue-item">
+              <div>
+                <a v-if="item.task.url" :href="item.task.url" target="_blank" rel="noopener noreferrer">{{ item.task.id }}</a>
+                <strong v-else>{{ item.task.id }}</strong>
+                <span>{{ item.task.summary }}</span>
+              </div>
+              <span class="mr-state">{{ formatMergeRequestState(item.task.gitLab?.mergeRequestState ?? '') || item.task.gitLab?.mergeRequestState }}</span>
+              <a v-if="item.task.gitLab?.url" class="mr-link" :href="item.task.gitLab.url" target="_blank" rel="noopener noreferrer">MR !{{ item.task.gitLab.mergeRequestIid }}<ExternalLink :size="13" /></a>
+            </div>
+          </div>
+        </section>
+
         <div class="columns">
           <section class="card tasks">
-            <div class="section-title"><div><span class="yt">YT</span><div><h2>Задачи по списаниям</h2><small>Отбор по автору worklog · исполнитель задачи не учитывается</small></div></div></div>
+            <div class="section-title"><div><span class="yt">YT</span><div><h2>Активность по задачам</h2><small>Worklog или подтверждённое действие сотрудника в GitLab за выбранный период</small></div></div></div>
             <article v-for="item in summary.tasks" :key="item.task.id" class="task-card" :class="{ review: isReview(item) }">
               <div class="task-head">
                 <div class="task-title">
@@ -348,7 +388,7 @@ watch(selectedModel, value => {
                 <strong>{{ formatDuration(item.task.estimateMinutes) }}</strong>
               </div>
               <div v-if="item.worklogs.length" class="worklog-total"><Clock3 :size="18" /><strong>{{ summary.hasExactWorklogDurations ? formatDuration(item.loggedMinutes) : item.worklogs.length }}</strong><span>{{ summary.hasExactWorklogDurations ? 'списал выбранный сотрудник' : 'дн. с подтверждёнными списаниями' }}</span></div>
-              <div v-else class="worklog-total reviewer-only"><UserCheck :size="18" /><span>Назначен ревьюером · списаний в выбранном периоде нет</span></div>
+              <div v-else class="worklog-total reviewer-only"><UserCheck :size="18" /><span>Подтверждена активность в GitLab · списаний в выбранном периоде нет</span></div>
               <div v-if="item.worklogs.length" class="worklogs">
                 <div class="worklog-header" :class="{ presence: !summary.hasExactWorklogDurations }">
                   <span>Дата</span><span v-if="summary.hasExactWorklogDurations">Тип</span><span v-if="summary.hasExactWorklogDurations">Время</span><span>Подтверждение</span><span></span>

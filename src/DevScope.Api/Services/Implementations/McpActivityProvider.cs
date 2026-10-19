@@ -112,6 +112,7 @@ public sealed partial class McpActivityProvider(
 
         var taskActivities = new List<TaskActivity>();
         var gitLabEvents = new List<ActivityEvent>();
+        var currentReviewAssignments = new List<TaskActivity>();
         foreach (var pair in issueById)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -210,8 +211,8 @@ public sealed partial class McpActivityProvider(
         }
 
         var reviewerSearchAvailable = await AddReviewerAssignmentsAsync(
-            taskActivities, gitLabEvents, issueTool, mergeRequestTool, mergeRequestCommentsTool,
-            employee, cancellationToken);
+            taskActivities, currentReviewAssignments, gitLabEvents, issueTool, mergeRequestTool,
+            mergeRequestCommentsTool, employee, from, to, cancellationToken);
         if (!reviewerSearchAvailable && !string.IsNullOrWhiteSpace(employee.GitLabUsername))
         {
             limitations.Add("GitLab MCP не предоставляет глобальный поиск MR по reviewer_username; задачи без списаний, где сотрудник только ревьюер, могут отсутствовать.");
@@ -221,11 +222,13 @@ public sealed partial class McpActivityProvider(
             .OrderByDescending(activity => activity.Worklogs.Select(worklog => worklog.Date).DefaultIfEmpty(DateOnly.MinValue).Max())
             .ThenBy(activity => activity.Task.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var reviewerOnlyTasks = ordered.Count(item =>
-            item.Worklogs.Count == 0 && item.Task.GitLab?.EmployeeIsReviewer == true);
+        var worklogTaskCount = ordered.Count(item => item.Worklogs.Count > 0);
+        var gitLabOnlyTaskCount = ordered.Length - worklogTaskCount;
         var activeDays = ordered.SelectMany(item => item.Worklogs).Select(item => item.Date).Distinct().Count();
-        var narrative = $"Списания подтверждены по {ordered.Length - reviewerOnlyTasks} задачам в {activeDays} дн. выбранного периода." +
-            (reviewerOnlyTasks > 0 ? $" Ещё {reviewerOnlyTasks} открытых задач назначено сотруднику на ревью." : string.Empty);
+        var narrative = $"Списания подтверждены по {worklogTaskCount} задачам в {activeDays} дн. выбранного периода." +
+            (gitLabOnlyTaskCount > 0
+                ? $" Ещё по {gitLabOnlyTaskCount} задачам подтверждена активность сотрудника в GitLab."
+                : string.Empty);
         var events = ordered
             .SelectMany(activity => activity.Worklogs.Select(worklog => new ActivityEvent(
                 worklog.Id,
@@ -237,6 +240,7 @@ public sealed partial class McpActivityProvider(
                 $"Есть списание в {activity.Task.Id}",
                 activity.Task.Summary)))
             .Concat(gitLabEvents)
+            .Where(item => IsInPeriod(item, from, to))
             .OrderByDescending(item => item.OccurredAt)
             .ToArray();
 
@@ -251,7 +255,8 @@ public sealed partial class McpActivityProvider(
             ordered,
             events,
             limitations.Distinct().ToArray(),
-            HasExactWorklogDurations: false);
+            HasExactWorklogDurations: false,
+            CurrentReviewAssignments: currentReviewAssignments);
     }
 
     private async Task<PeriodSummary> GetExactPeriodSummaryAsync(
@@ -279,6 +284,7 @@ public sealed partial class McpActivityProvider(
             : [];
         var activities = new List<TaskActivity>();
         var events = new List<ActivityEvent>();
+        var currentReviewAssignments = new List<TaskActivity>();
 
         foreach (var group in worklogs.GroupBy(item => item.TaskId, StringComparer.OrdinalIgnoreCase))
         {
@@ -376,8 +382,8 @@ public sealed partial class McpActivityProvider(
         }
 
         var reviewerSearchAvailable = await AddReviewerAssignmentsAsync(
-            activities, events, issueTool, mergeRequestTool, mergeRequestCommentsTool,
-            employee, cancellationToken);
+            activities, currentReviewAssignments, events, issueTool, mergeRequestTool,
+            mergeRequestCommentsTool, employee, from, to, cancellationToken);
         if (!reviewerSearchAvailable && !string.IsNullOrWhiteSpace(employee.GitLabUsername))
         {
             limitations.Add("GitLab MCP не предоставляет глобальный поиск MR по reviewer_username; задачи без списаний, где сотрудник только ревьюер, могут отсутствовать.");
@@ -387,8 +393,8 @@ public sealed partial class McpActivityProvider(
             .OrderByDescending(item => item.Worklogs.Select(worklog => worklog.Date).DefaultIfEmpty(DateOnly.MinValue).Max())
             .ThenBy(item => item.Task.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var reviewerOnlyTasks = ordered.Count(item =>
-            item.Worklogs.Count == 0 && item.Task.GitLab?.EmployeeIsReviewer == true);
+        var worklogTaskCount = ordered.Count(item => item.Worklogs.Count > 0);
+        var gitLabOnlyTaskCount = ordered.Length - worklogTaskCount;
         return new PeriodSummary(
             employee,
             from,
@@ -396,12 +402,14 @@ public sealed partial class McpActivityProvider(
             worklogs.Sum(item => item.DurationMinutes),
             ordered.Length,
             ordered.Count(item => item.Task.GitLab is not null),
-            reviewerOnlyTasks > 0
-                ? $"Списано время по {ordered.Length - reviewerOnlyTasks} задачам; ещё {reviewerOnlyTasks} открытых задач назначено сотруднику на ревью."
-                : $"Списано время по {ordered.Length} задачам.",
+            $"Списано время по {worklogTaskCount} задачам." +
+            (gitLabOnlyTaskCount > 0
+                ? $" Ещё по {gitLabOnlyTaskCount} задачам подтверждена активность сотрудника в GitLab."
+                : string.Empty),
             ordered,
-            events.OrderByDescending(item => item.OccurredAt).ToArray(),
-            limitations);
+            events.Where(item => IsInPeriod(item, from, to)).OrderByDescending(item => item.OccurredAt).ToArray(),
+            limitations,
+            CurrentReviewAssignments: currentReviewAssignments);
     }
 
     private async Task<List<JsonElement>> ReadAllWorkItemsAsync(
@@ -822,11 +830,14 @@ public sealed partial class McpActivityProvider(
 
     private async Task<bool> AddReviewerAssignmentsAsync(
         List<TaskActivity> activities,
+        List<TaskActivity> currentReviewAssignments,
         List<ActivityEvent> events,
         string? issueTool,
         string? mergeRequestTool,
         McpToolInfo? mergeRequestCommentsTool,
         Employee employee,
+        DateOnly from,
+        DateOnly to,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(employee.GitLabUsername))
@@ -870,8 +881,9 @@ public sealed partial class McpActivityProvider(
                     };
                     activities[existingIndex] = updated;
                     _taskCache[$"{employee.Id}:{updated.Task.Id}"] = updated;
+                    currentReviewAssignments.Add(updated);
+                    continue;
                 }
-                continue;
             }
 
             WorkTask? task = null;
@@ -893,6 +905,7 @@ public sealed partial class McpActivityProvider(
                 null);
 
             var gitLabReference = assignment.Reference;
+            ActivityEvent[] employeeEvents = [];
             if (mergeRequestTool is not null)
             {
                 var details = await mcp.CallToolAsync(
@@ -913,13 +926,23 @@ public sealed partial class McpActivityProvider(
                 {
                     EmployeeIsReviewer = true
                 };
-                events.AddRange(ParseGitLabEvents(details, task.Id, employee, gitLabReference, supplementalNotes));
+                employeeEvents = ParseGitLabEvents(details, task.Id, employee, gitLabReference, supplementalNotes)
+                    .Where(item => IsInPeriod(item, from, to))
+                    .ToArray();
+                events.AddRange(employeeEvents);
             }
 
             task = task with { GitLab = EnsureMergeRequestUrl(gitLabReference) };
             var activity = new TaskActivity(task, 0, [], IsEmployeeDeveloper(task.DeveloperId, employee));
-            activities.Add(activity);
-            _taskCache[$"{employee.Id}:{task.Id}"] = activity;
+            currentReviewAssignments.Add(activity);
+            if (employeeEvents.Length > 0 && existingIndex < 0)
+            {
+                activities.Add(activity);
+            }
+            if (existingIndex < 0)
+            {
+                _taskCache[$"{employee.Id}:{task.Id}"] = activity;
+            }
         }
         return true;
     }
@@ -1065,6 +1088,12 @@ public sealed partial class McpActivityProvider(
             .GroupBy(item => $"{item.Reference.ProjectPath}!{item.Reference.MergeRequestIid}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToArray();
+    }
+
+    private static bool IsInPeriod(ActivityEvent item, DateOnly from, DateOnly to)
+    {
+        var date = DateOnly.FromDateTime(item.OccurredAt.Date);
+        return date >= from && date <= to;
     }
 
     private static void AddSupportedArgument(
@@ -1407,13 +1436,11 @@ public sealed partial class McpActivityProvider(
             foreach (var commit in commits.EnumerateArray().Take(100))
             {
                 var occurredAt = ParseTimestamp(commit.FirstProperty("committed_date", "authored_date", "created_at"));
-                if (occurredAt is null)
+                if (occurredAt is null || !IsCommitByEmployee(commit, employee))
                 {
                     continue;
                 }
                 var id = commit.FirstProperty("id", "short_id").StringValue() ?? Guid.NewGuid().ToString("N");
-                var isEmployeeCommit = IsCommitByEmployee(commit, employee);
-                var author = GetCommitAuthorLabel(commit);
                 yield return new ActivityEvent(
                     $"gitlab:commit:{id}",
                     taskId,
@@ -1421,12 +1448,8 @@ public sealed partial class McpActivityProvider(
                     occurredAt.Value,
                     "GitLab",
                     "Commit",
-                    isEmployeeCommit
-                        ? $"Коммит в {reference.Branch}"
-                        : $"Коммит другого автора в {reference.Branch}",
-                    isEmployeeCommit
-                        ? commit.FirstProperty("title", "message").StringValue()
-                        : $"Автор: {author}. {commit.FirstProperty("title", "message").StringValue()}",
+                    $"Коммит в {reference.Branch}",
+                    commit.FirstProperty("title", "message").StringValue(),
                     commit.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url);
             }
         }
@@ -1446,26 +1469,32 @@ public sealed partial class McpActivityProvider(
             }
             var id = note.FirstProperty("id").StringValue() ?? Guid.NewGuid().ToString("N");
             var isEmployeeAction = IsEmployeeGitLabAuthor(note, employee);
+            if (!isEmployeeAction)
+            {
+                continue;
+            }
             var isMerge = isEmployeeAction && IsMergeNote(note, mergedAt);
             var isApproval = isEmployeeAction && IsApprovalNote(note);
             var isResolution = isEmployeeAction && IsThreadResolutionNote(note);
             var isComment = isEmployeeAction && !isApproval && !isMerge && !isResolution && !IsSystemNote(note);
+            if (!isMerge && !isApproval && !isResolution && !isComment)
+            {
+                continue;
+            }
             yield return new ActivityEvent(
                 $"gitlab:discussion:{id}",
                 taskId,
                 employee.Id,
                 occurredAt.Value,
                 "GitLab",
-                isMerge ? "Merge" : isApproval ? "Approval" : isResolution ? "ThreadResolution" : isComment ? "ReviewComment" : "Discussion",
+                isMerge ? "Merge" : isApproval ? "Approval" : isResolution ? "ThreadResolution" : "ReviewComment",
                 isMerge
                     ? $"Сотрудник слил MR !{reference.MergeRequestIid}"
                     : isApproval
                         ? $"Сотрудник одобрил MR !{reference.MergeRequestIid}"
                         : isResolution
                             ? $"Сотрудник разрешил треды в MR !{reference.MergeRequestIid}"
-                            : isComment
-                                ? $"Сотрудник оставил комментарий в MR !{reference.MergeRequestIid}"
-                                : $"Обсуждение MR !{reference.MergeRequestIid}",
+                            : $"Сотрудник оставил комментарий в MR !{reference.MergeRequestIid}",
                 isApproval ? null : note.FirstProperty("body", "text").StringValue(),
                 note.FirstProperty("web_url", "webUrl", "url").StringValue() ?? reference.Url);
         }

@@ -57,6 +57,12 @@ public sealed class MockActivityProvider(IWebHostEnvironment environment) : IAct
         var narrative = reviewCount > 0
             ? $"Работал над {ownTaskCount} своими задачами и участвовал в Code Review чужих задач."
             : $"Работал над {ownTaskCount} задачами разработки.";
+        var currentReviewAssignments = data.Tasks
+            .Select(task => EnrichMockTask(task, employee))
+            .Where(task => task.GitLab?.EmployeeIsReviewer == true &&
+                task.GitLab.MergeRequestState is "open" or "opened")
+            .Select(task => new TaskActivity(task, 0, [], task.DeveloperId == employeeId))
+            .ToArray();
 
         return new PeriodSummary(
             employee,
@@ -68,7 +74,8 @@ public sealed class MockActivityProvider(IWebHostEnvironment environment) : IAct
             narrative,
             tasks,
             events,
-            []);
+            [],
+            CurrentReviewAssignments: currentReviewAssignments);
     }
 
     public async Task<TaskActivity?> GetTaskActivityAsync(

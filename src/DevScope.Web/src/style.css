@@ -14,6 +14,8 @@ nav button:hover { background: #f3f6fb; }
 nav button.active { color: #1769e0; background: #eaf2ff; font-weight: 650; }
 .sidebar-bottom { margin-top: auto; }
 main { padding: 25px 26px 36px; max-width: 1660px; width: 100%; margin: 0 auto; }
+.sticky-top { position: sticky; top: 0; z-index: 20; margin-top: -25px; padding: 25px 0 16px; background: #f5f7fb; }
+.sticky-top .filters { margin-bottom: 0; }
 header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .header-actions { display: flex; align-items: center; gap: 13px; }
 h1 { margin: 2px 0 0; font-size: 29px; letter-spacing: -.02em; }
@@ -40,6 +42,25 @@ h2 { margin: 0; font-size: 19px; }
 .source-notice div { display: grid; gap: 3px; }
 .source-notice strong { font-size: 13px; }
 .source-notice span { font-size: 12px; line-height: 1.5; }
+.review-queue { padding: 15px 17px; }
+.review-queue-summary, .review-queue-title, .review-queue-actions { display: flex; align-items: center; }
+.review-queue-summary { justify-content: space-between; gap: 18px; }
+.review-queue-title { min-width: 0; gap: 11px; }
+.review-queue-title h2 { font-size: 16px; }
+.review-queue-title small { display: block; margin-top: 3px; color: #788397; font-size: 11px; }
+.review-queue-icon { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: #315f8e; background: #e7f1fb; border-radius: 9px; }
+.review-queue-actions { flex: 0 0 auto; gap: 12px; color: #334158; font-size: 13px; }
+.review-queue-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 7px 10px; color: #1468d4; background: #f4f8fe; border: 1px solid #d8e5f7; border-radius: 8px; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
+.review-queue-toggle:hover { background: #eaf2ff; }
+.review-queue-toggle svg { transition: transform .15s ease; }
+.review-queue-toggle svg.rotated { transform: rotate(180deg); }
+.review-queue-details { display: grid; gap: 6px; margin-top: 13px; padding-top: 13px; border-top: 1px solid #e8edf4; }
+.review-queue-item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 9px 10px; background: #f8faff; border-radius: 8px; font-size: 12px; }
+.review-queue-item > div { min-width: 0; display: flex; align-items: baseline; gap: 7px; }
+.review-queue-item > div a, .review-queue-item > div strong { flex: 0 0 auto; color: #1468d4; font-weight: 700; }
+.review-queue-item > div span { min-width: 0; overflow: hidden; color: #536179; text-overflow: ellipsis; white-space: nowrap; }
+.review-queue-item > .mr-state { padding: 4px 7px; color: #59456f; background: #f1ebf8; border-radius: 7px; font-size: 11px; font-weight: 650; }
+.review-queue-item > .mr-link { padding: 6px 8px; color: #fff; background: #7252a0; border-radius: 7px; }
 .columns { display: grid; grid-template-columns: minmax(670px, 1.8fr) minmax(360px, .72fr); gap: 16px; margin-top: 16px; }
 .tasks, .timeline { padding: 19px; }
 .section-title, .section-title > div { display: flex; align-items: center; justify-content: space-between; gap: 11px; }
@@ -151,5 +172,5 @@ h2 { margin: 0; font-size: 19px; }
 .settings-card .p-button { align-self: flex-start; display: inline-flex; gap: 7px; }
 .settings-save { display: flex; justify-content: flex-end; margin-top: 16px; }
 .settings-save .p-button { display: inline-flex; gap: 7px; }
-@media (max-width: 1350px) { .summary { grid-template-columns: minmax(360px, 2fr) repeat(4, 1fr); } .metric { padding: 7px 11px; } .columns { grid-template-columns: 1fr; } }
+@media (max-width: 1350px) { .summary { grid-template-columns: minmax(360px, 2fr) repeat(4, 1fr); } .metric { padding: 7px 11px; } .columns { grid-template-columns: 1fr; } .review-queue-item { grid-template-columns: minmax(0, 1fr) auto; } .review-queue-item > .mr-state { display: none; } }
 

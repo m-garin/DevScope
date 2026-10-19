@@ -77,6 +77,7 @@ export interface PeriodSummary {
   limitations: string[]
   dataUpdatedAt?: string
   hasExactWorklogDurations: boolean
+  currentReviewAssignments?: TaskActivity[]
 }
 
 export interface TaskAnalysis {

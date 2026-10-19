@@ -12,4 +12,5 @@ public sealed record PeriodSummary(
     IReadOnlyList<ActivityEvent> Events,
     IReadOnlyList<string> Limitations,
     DateTimeOffset? DataUpdatedAt = null,
-    bool HasExactWorklogDurations = true);
+    bool HasExactWorklogDurations = true,
+    IReadOnlyList<TaskActivity>? CurrentReviewAssignments = null);

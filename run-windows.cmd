@@ -24,11 +24,7 @@ where docker >nul 2>&1 || (echo ERROR: docker was not found.& exit /b 1)
 where dotnet >nul 2>&1 || (echo ERROR: .NET SDK 10 was not found.& exit /b 1)
 where npm >nul 2>&1 || (echo ERROR: Node.js and npm were not found.& exit /b 1)
 dotnet --list-sdks | findstr /b "10." >nul || (echo ERROR: .NET SDK 10 was not found.& exit /b 1)
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\Invoke-ProcessWithTimeout.ps1" -TimeoutSeconds 15 -FilePath docker info >nul 2>&1
-if errorlevel 1 (
-  echo ERROR: Docker Desktop did not respond within 15 seconds. DevScope was not started.
-  exit /b 1
-)
+docker info >nul 2>&1 || (echo ERROR: Docker Desktop is not running.& exit /b 1)
 
 for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env.real") do if not "%%A"=="" set "%%A=%%B"
 if not defined DEVSCOPE_PORT set "DEVSCOPE_PORT=8080"
@@ -41,15 +37,11 @@ if not defined DEVSCOPE_DB_USER set "DEVSCOPE_DB_USER=devscope"
 if not defined DEVSCOPE_DB_PASSWORD set "DEVSCOPE_DB_PASSWORD=devscope-local-only"
 
 echo [2/6] Stopping the Linux DevScope container...
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\Invoke-ProcessWithTimeout.ps1" -TimeoutSeconds 15 -FilePath docker compose --env-file .env.real stop devscope >nul 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\Invoke-ProcessWithTimeout.ps1" -TimeoutSeconds 15 -FilePath docker compose --env-file .env.real rm -f devscope >nul 2>&1
+docker compose --env-file .env.real stop devscope >nul 2>&1
+docker compose --env-file .env.real rm -f devscope >nul 2>&1
 
 echo [3/6] Starting PostgreSQL in Docker...
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\Invoke-ProcessWithTimeout.ps1" -TimeoutSeconds 30 -FilePath docker compose -f compose.yaml -f compose.windows.yaml --env-file .env.real up -d postgres
-if errorlevel 1 goto :failed
-
-echo Waiting up to 120 seconds for PostgreSQL...
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\Wait-TcpPort.ps1" -TargetHost 127.0.0.1 -Port %DEVSCOPE_DB_PORT% -TimeoutSeconds 120
+docker compose -f compose.yaml -f compose.windows.yaml --env-file .env.real up -d --wait --wait-timeout 120 postgres
 if errorlevel 1 goto :failed
 
 :build_web
@@ -90,5 +82,4 @@ exit /b %DEVSCOPE_EXIT%
 :failed
 echo.
 echo ERROR: Windows launch failed.
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\Invoke-ProcessWithTimeout.ps1" -TimeoutSeconds 10 -FilePath docker compose -f compose.yaml -f compose.windows.yaml --env-file .env.real ps
 exit /b 1

@@ -14,7 +14,8 @@ namespace DevScope.Api.Services.Implementations;
 public sealed partial class McpActivityProvider(
     IMcpGatewayClient mcp,
     ITeamDirectory teamDirectory,
-    IOptions<DevScopeOptions> options) : IActivityProvider
+    IOptions<DevScopeOptions> options,
+    ILogger<McpActivityProvider> logger) : IActivityProvider
 {
     private const string YouTrackServer = "youtrack";
     private const string GitLabServer = "gitlab";
@@ -117,19 +118,24 @@ public sealed partial class McpActivityProvider(
             var taskId = pair.Key;
             var issuePayload = pair.Value;
             var task = ParseIssue(pair.Value, employee);
+            var issueAvailable = true;
 
             if (issueTool is not null)
             {
-                var issue = await mcp.CallToolAsync(
-                    YouTrackServer,
-                    issueTool,
-                    new Dictionary<string, object?> { ["issueId"] = taskId },
-                    cancellationToken);
-                issuePayload = issue;
-                task = ParseIssue(issue, employee) ?? task;
+                var issue = await TryReadIssueAsync(issueTool, taskId, cancellationToken);
+                issueAvailable = issue is not null;
+                if (issue is not null)
+                {
+                    issuePayload = issue.Value;
+                    task = ParseIssue(issue.Value, employee) ?? task;
+                }
+                else
+                {
+                    limitations.Add($"Задача {taskId} удалена или недоступна в YouTrack; показаны доступные данные worklog.");
+                }
             }
 
-            if (task is not null && task.GitLab is null && commentTool is not null)
+            if (issueAvailable && task is not null && task.GitLab is null && commentTool is not null)
             {
                 var comments = await mcp.CallToolAsync(
                     YouTrackServer,
@@ -281,16 +287,22 @@ public sealed partial class McpActivityProvider(
                 string.Equals(GetTaskId(item), taskId, StringComparison.OrdinalIgnoreCase));
             var issuePayload = raw.ValueKind == JsonValueKind.Undefined ? default : raw;
             var task = raw.ValueKind == JsonValueKind.Undefined ? null : ParseEmbeddedTask(raw, employee);
+            var issueAvailable = true;
             if (issueTool is not null)
             {
-                var issue = await mcp.CallToolAsync(
-                    YouTrackServer, issueTool,
-                    new Dictionary<string, object?> { ["issueId"] = taskId },
-                    cancellationToken);
-                issuePayload = issue;
-                task = ParseIssue(issue, employee) ?? task;
+                var issue = await TryReadIssueAsync(issueTool, taskId, cancellationToken);
+                issueAvailable = issue is not null;
+                if (issue is not null)
+                {
+                    issuePayload = issue.Value;
+                    task = ParseIssue(issue.Value, employee) ?? task;
+                }
+                else
+                {
+                    limitations.Add($"Задача {taskId} удалена или недоступна в YouTrack; показаны доступные данные worklog.");
+                }
             }
-            if (task is not null && task.GitLab is null && commentTool is not null)
+            if (issueAvailable && task is not null && task.GitLab is null && commentTool is not null)
             {
                 var comments = await mcp.CallToolAsync(
                     YouTrackServer, commentTool,
@@ -865,12 +877,11 @@ public sealed partial class McpActivityProvider(
             WorkTask? task = null;
             if (issueTool is not null)
             {
-                var issue = await mcp.CallToolAsync(
-                    YouTrackServer,
-                    issueTool,
-                    new Dictionary<string, object?> { ["issueId"] = assignment.TaskId },
-                    cancellationToken);
-                task = ParseIssue(issue, employee);
+                var issue = await TryReadIssueAsync(issueTool, assignment.TaskId, cancellationToken);
+                if (issue is not null)
+                {
+                    task = ParseIssue(issue.Value, employee);
+                }
             }
             task ??= new WorkTask(
                 assignment.TaskId,
@@ -911,6 +922,41 @@ public sealed partial class McpActivityProvider(
             _taskCache[$"{employee.Id}:{task.Id}"] = activity;
         }
         return true;
+    }
+
+    private async Task<JsonElement?> TryReadIssueAsync(
+        string issueTool,
+        string taskId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await mcp.CallToolAsync(
+                YouTrackServer,
+                issueTool,
+                new Dictionary<string, object?> { ["issueId"] = taskId },
+                cancellationToken);
+        }
+        catch (McpIntegrationException exception) when (IsIssueNotFound(exception))
+        {
+            logger.LogWarning(
+                "YouTrack issue {TaskId} was referenced by activity data but is unavailable; continuing without issue details.",
+                taskId);
+            return null;
+        }
+    }
+
+    private static bool IsIssueNotFound(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains("Issue not found", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task<McpToolInfo?> ResolveReviewerMergeRequestListToolAsync(CancellationToken cancellationToken)

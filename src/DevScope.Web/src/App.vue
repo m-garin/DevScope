@@ -33,7 +33,9 @@ const settingsMessage = ref('')
 const settingsError = ref('')
 const timelineSource = ref<'All' | 'YouTrack' | 'GitLab'>('All')
 const expandedTimelineEvents = ref<Record<string, boolean>>({})
+const expandedTaskWorklogs = ref<Record<string, boolean>>({})
 const showAllTimelineEvents = ref(false)
+const collapsedWorklogLimit = 3
 
 const refreshIntervalOptions = [
   { label: 'Раз в час', value: 'Hourly' as CacheRefreshInterval },
@@ -152,6 +154,13 @@ function toggleTimelineEvent(eventId: string) {
   }
 }
 
+function toggleTaskWorklogs(taskId: string) {
+  expandedTaskWorklogs.value = {
+    ...expandedTaskWorklogs.value,
+    [taskId]: !expandedTaskWorklogs.value[taskId]
+  }
+}
+
 function isReview(task: TaskActivity) {
   return task.worklogs.some(item => item.type.toLocaleLowerCase().includes('ревью'))
 }
@@ -173,6 +182,7 @@ async function load() {
   error.value = ''
   timelineSource.value = 'All'
   expandedTimelineEvents.value = {}
+  expandedTaskWorklogs.value = {}
   showAllTimelineEvents.value = false
   try {
     summary.value = await api.activity(selectedEmployee.value, toIsoDate(dates.value[0]), toIsoDate(dates.value[1]))
@@ -305,8 +315,8 @@ watch(selectedModel, value => {
           <div v-if="summary.hasExactWorklogDurations" class="metric"><span>Списано по worklog</span><strong>{{ totalHours }}</strong></div>
           <div v-else class="metric"><span>Дней со списаниями</span><strong>{{ activeDays }}</strong></div>
           <div v-if="summary.hasExactWorklogDurations" class="metric"><span>На Code Review</span><strong>{{ reviewHours }}</strong></div>
-          <div v-else class="metric"><span>Задача × день</span><strong>{{ worklogPresenceCount }}</strong></div>
-          <div class="metric"><span>Задач</span><strong>{{ summary.taskCount }}</strong></div>
+          <div v-else class="metric"><span>Подтверждений списаний</span><strong>{{ worklogPresenceCount }}</strong></div>
+          <div class="metric"><span>Задач в выборке</span><strong>{{ summary.taskCount }}</strong></div>
           <div class="metric"><span>Связанных MR</span><strong>{{ summary.mergeRequestCount }}</strong></div>
         </section>
 
@@ -327,7 +337,7 @@ watch(selectedModel, value => {
                   <h3 :title="item.task.summary"><a :href="item.task.url" target="_blank" rel="noopener noreferrer">{{ item.task.id }}</a> · {{ item.task.summary }}</h3>
                   <div class="task-signals">
                     <span v-if="item.task.digitalTwinStarted" class="digital-twin" title="В задаче есть тег SODA в YouTrack">Цифровой Двойник</span>
-                    <span v-if="!item.isOwnTask" class="foreign">Сотрудник не указан исполнителем</span>
+                    <span v-if="!item.isOwnTask" class="foreign" title="Задача попала в выборку по списанию сотрудника, даже если исполнителем назначен другой человек">Автор списания, не исполнитель</span>
                   </div>
                 </div>
                 <span class="status">{{ item.task.status }}</span>
@@ -343,10 +353,14 @@ watch(selectedModel, value => {
                 <div class="worklog-header" :class="{ presence: !summary.hasExactWorklogDurations }">
                   <span>Дата</span><span v-if="summary.hasExactWorklogDurations">Тип</span><span v-if="summary.hasExactWorklogDurations">Время</span><span>Подтверждение</span><span></span>
                 </div>
-                <div v-for="worklog in item.worklogs" :key="worklog.id" :class="{ presence: !summary.hasExactWorklogDurations }">
+                <div v-for="worklog in (expandedTaskWorklogs[item.task.id] ? item.worklogs : item.worklogs.slice(0, collapsedWorklogLimit))" :key="worklog.id" :class="{ presence: !summary.hasExactWorklogDurations }">
                   <span>{{ formatDateOnly(worklog.date) }}</span><strong v-if="summary.hasExactWorklogDurations">{{ worklog.type }}</strong><span v-if="summary.hasExactWorklogDurations">{{ formatDuration(worklog.durationMinutes) }}</span><em>{{ summary.hasExactWorklogDurations ? worklog.description : 'Автор и дата подтверждены YouTrack' }}</em>
                   <a v-if="worklog.url" class="row-link" :href="worklog.url" target="_blank" rel="noopener noreferrer" title="Открыть это списание в YouTrack"><ExternalLink :size="14" /><span>Открыть</span></a>
                 </div>
+                <button v-if="item.worklogs.length > collapsedWorklogLimit" class="worklogs-toggle" @click="toggleTaskWorklogs(item.task.id)">
+                  {{ expandedTaskWorklogs[item.task.id] ? 'Скрыть' : `Ещё ${item.worklogs.length - collapsedWorklogLimit}` }}
+                  <ChevronDown :size="14" :class="{ rotated: expandedTaskWorklogs[item.task.id] }" />
+                </button>
               </div>
               <div v-if="item.task.gitLab" class="gitlab-row">
                 <div class="gitlab-header">
@@ -406,6 +420,7 @@ watch(selectedModel, value => {
                 {{ source === 'All' ? 'Все' : source }}
               </button>
             </div>
+            <div class="timeline-note"><Info :size="14" /><span>Worklog и GitLab показаны отдельно; события GitLab не переводятся в часы.</span></div>
             <div v-if="visibleTimelineEvents.length === 0" class="timeline-empty">Нет событий выбранного источника.</div>
             <div v-for="event in visibleTimelineEvents" :key="event.id" class="timeline-item">
               <span class="dot" :class="event.source.toLowerCase()"></span>
@@ -422,7 +437,6 @@ watch(selectedModel, value => {
               </div>
             </div>
             <button v-if="hiddenTimelineEventCount" class="show-more" @click="showAllTimelineEvents = true">Показать ещё {{ hiddenTimelineEventCount }}</button>
-            <div class="verified"><CheckCircle2 :size="18" /><span>Worklog и GitLab отображаются раздельно. GitLab-события не пересчитываются в часы.</span></div>
           </section>
         </div>
       </template>

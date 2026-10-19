@@ -3,6 +3,12 @@ setlocal EnableExtensions
 
 cd /d "%~dp0"
 set "DEVSCOPE_ROOT=%CD%"
+set "CLEAR_CACHE=0"
+if /i "%~1"=="--clear-cache" set "CLEAR_CACHE=1"
+if not "%~1"=="" if /i not "%~1"=="--clear-cache" (
+  echo ERROR: Unknown option "%~1". Use --clear-cache or run without options.
+  exit /b 1
+)
 
 echo [1/6] Checking configuration and tools...
 if not exist ".env.real" (
@@ -75,9 +81,11 @@ set "DevScope__TeamsConfigPath=%DEVSCOPE_ROOT%\config\teams.json"
 set "DevScope__ProjectKey=%DEVSCOPE_PROJECT_KEY%"
 set "DevScope__DeveloperGroup=%DEVSCOPE_DEVELOPER_GROUP%"
 set "DevScope__DailyRefreshHour=%DEVSCOPE_DAILY_REFRESH_HOUR%"
+set "DevScope__ClearCacheOnStartup=%CLEAR_CACHE%"
 set "ConnectionStrings__DevScope=Host=127.0.0.1;Port=%DEVSCOPE_DB_PORT%;Database=%DEVSCOPE_DB_NAME%;Username=%DEVSCOPE_DB_USER%;Password=%DEVSCOPE_DB_PASSWORD%"
 
 echo [6/6] Starting DevScope on Windows...
+if "%CLEAR_CACHE%"=="1" echo Cached activity reports will be cleared during startup. Application settings will be preserved.
 echo Open http://127.0.0.1:%DEVSCOPE_PORT% after the Application started message.
 echo Keep this window open. Press Ctrl+C to stop DevScope.
 echo.

@@ -20,39 +20,9 @@
 заблокированные и отключённые пользователи в список не включаются. Другие группы
 можно указать через `DEVSCOPE_DEVELOPER_GROUP`.
 
-### Корпоративный TLS-сертификат для Docker
-
-OpenCode использует хранилище сертификатов Windows, а Linux-контейнер имеет
-отдельное хранилище. Если в логах DevScope есть `UntrustedRoot`, один раз
-экспортируйте доверенную цепочку корпоративного gateway из Windows:
-
-```powershell
-cd C:\Work\Repositories\DevScope
-.\scripts\Export-CorporateCa.ps1
-```
-
-Скрипт подключается к `ai-gateway-prod.sovcombank.group`, строит цепочку через
-доверенное хранилище Windows и сохраняет только публичные CA-сертификаты в
-`certs\*.crt`. Leaf-сертификат сервера, приватные ключи и MCP-токены не
-экспортируются. Содержимое `certs` исключено из Git.
-
-Compose монтирует каталог `certs` в контейнер, а стартовый скрипт автоматически
-выполняет `update-ca-certificates`. После экспорта пересоздайте приложение:
-
-```powershell
-docker compose --env-file .env.real up -d --build devscope
-```
-
-Проверьте подключение:
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8080/api/configuration/mcp/tools
-Invoke-RestMethod http://127.0.0.1:8080/api/employees
-```
-
-Не отключайте TLS validation и не используйте `--insecure`. Если корпоративная
-политика требует официальный CA bundle, положите выданные администраторами PEM
-сертификаты с расширением `.crt` в тот же каталог `certs` вместо экспорта.
+Бэкенд запускается непосредственно на Windows и использует корпоративное
+хранилище доверенных сертификатов Windows. Отключать TLS validation или добавлять
+`--insecure` не требуется.
 
 В `.env.real` укажите ключ проекта:
 
@@ -77,29 +47,20 @@ DEVSCOPE_DB_PASSWORD=devscope-local-only
 DEVSCOPE_DAILY_REFRESH_HOUR=3
 ```
 
-### 2. Запустите Docker Desktop
-
-Дождитесь состояния `Engine running`, затем в корне репозитория выполните:
-
-```powershell
-.\run-remote.cmd
-```
-
-Скрипт проверит конфигурацию, уберёт контейнеры от предыдущих ручных запусков,
-поднимет PostgreSQL и DevScope, дождётся их готовности и проверит HTTP API. Он
-не удаляет PostgreSQL volume и данные базы.
-
-### Перезапуск и очистка MCP-кэша внутри Canvas
+### 2. Запуск и очистка MCP-кэша внутри Canvas
 
 Команды выполняйте в терминале Canvas, открытом в корне репозитория DevScope.
 Запускать их на пользовательском компьютере не требуется.
 
-Обычный перезапуск после изменения исходников сохраняет снимки активности в
-PostgreSQL:
+Для запуска нужны Docker Desktop, .NET SDK 10 и Node.js. Docker используется
+только для PostgreSQL; API и frontend собираются и запускаются на Windows, чтобы
+корпоративные MCP работали через доверенное хранилище Windows.
+
+Обычный запуск или перезапуск сохраняет снимки активности в PostgreSQL:
 
 ```powershell
 cd C:\Work\Repositories\DevScope
-.\run-remote.cmd
+.\run-windows.cmd
 ```
 
 Если менялись правила разбора GitLab/YouTrack, контракты кэша или атрибуция
@@ -107,66 +68,42 @@ cd C:\Work\Repositories\DevScope
 
 ```powershell
 cd C:\Work\Repositories\DevScope
-.\run-remote.cmd --clear-cache
+.\run-windows.cmd --clear-cache
 ```
 
-Режим `--clear-cache` после успешного запуска API удаляет только записи
-`CachedReports`. PostgreSQL volume, настройки приложения, выбранная LLM-модель и
-исходные данные MCP сохраняются. После команды обновите страницу браузера и
-повторно откройте сотрудника и диапазон дат — первый запрос заново получит данные
-через реальные MCP и создаст свежий снимок.
+Режим `--clear-cache` во время старта удаляет только записи `CachedReports`.
+PostgreSQL volume, настройки приложения, выбранная LLM-модель и исходные данные
+MCP сохраняются. После сообщения `Application started` обновите страницу браузера
+и повторно откройте сотрудника и диапазон дат — первый запрос заново получит
+данные через реальные MCP и создаст свежий снимок.
 
 Не используйте для очистки кэша `docker compose down -v`: эта команда удаляет
 весь PostgreSQL volume вместе с настройками.
 
-Если корпоративный MCP доступен из Windows, но Linux-контейнер получает
-`UntrustedRoot`, запустите приложение на Windows, оставив в Docker только
-PostgreSQL:
-
-```powershell
-.\run-windows.cmd
-```
-
-Для этого варианта на Windows должны быть установлены .NET SDK 10 и Node.js.
-Бэкенд использует доверенное хранилище сертификатов Windows, поэтому переносить
-корпоративный CA в Linux-контейнер не требуется. Окно скрипта нужно оставить
-открытым на время работы DevScope.
-
-В real-режиме mock-контейнер не запускается.
+Окно `run-windows.cmd` нужно оставить открытым на время работы DevScope. Для
+остановки нажмите `Ctrl+C`. В real-режиме mock-контейнер не запускается.
 
 ### 3. Проверьте запуск
 
 ```powershell
-docker compose --env-file .env.real ps
-docker compose --env-file .env.real logs --tail=100 devscope
+docker compose -f compose.yaml -f compose.windows.yaml --env-file .env.real ps
+Invoke-RestMethod http://127.0.0.1:8080/api/health
+Invoke-RestMethod http://127.0.0.1:8080/api/configuration/mcp/tools
 ```
 
 Откройте `http://127.0.0.1:8080`.
 
 ### Применить изменения фронта и бэкенда
 
-После `git pull` или редактирования исходников не нужно заново поднимать весь
-compose-проект. Выполните одну команду:
+После `git pull` или редактирования исходников остановите текущее окно через
+`Ctrl+C` и снова запустите:
 
 ```powershell
-docker compose --env-file .env.real up -d --build devscope
+.\run-windows.cmd
 ```
 
-Она пересобирает и заменяет только образ приложения `devscope`. Compose также
-проверяет зависимость PostgreSQL: если база ещё не запущена, он запустит её и
-дождётся состояния `healthy`; если уже работает — оставит как есть. Образ
-PostgreSQL не пересобирается, volume с кэшем сохраняется, реальные MCP остаются
-внешними. Docker использует кэш слоёв: `npm ci` повторяется только при изменении
-`package.json`/lock-файла, а `dotnet restore` — только при изменении `.csproj`.
-
-Не добавляйте `--no-deps` при первом запуске или после остановки PostgreSQL:
-DevScope требует базу уже во время старта.
-
-Посмотреть результат:
-
-```powershell
-docker compose --env-file .env.real logs --tail=100 devscope
-```
+Скрипт повторно соберёт frontend, скопирует его в API и запустит актуальный
+бэкенд. PostgreSQL volume и кэш при обычном запуске сохраняются.
 
 Проверить соединение и увидеть реальные методы каждого MCP:
 
@@ -263,19 +200,22 @@ docker compose --env-file .env.mock --profile mock up --build -d
 
 ## Сетевые порты
 
-Наружу публикуется только интерфейс и только на loopback:
+Windows-бэкенд и PostgreSQL доступны только через loopback:
 
 ```text
-127.0.0.1:8080 -> container:8080
+127.0.0.1:8080 -> DevScope.Api на Windows
+127.0.0.1:5432 -> PostgreSQL в Docker
 ```
 
-MCP endpoints исходящие; порты для них и PostgreSQL на хосте не открываются. Не
-меняйте `DEVSCOPE_BIND_ADDRESS` на `0.0.0.0`.
+MCP endpoints исходящие. Не меняйте адрес привязки на `0.0.0.0`.
 
 ## Остановка
 
+Остановите Windows-бэкенд сочетанием `Ctrl+C` в окне `run-windows.cmd`. Если
+PostgreSQL больше не нужен, остановите и его:
+
 ```powershell
-docker compose --env-file .env.real down
+docker compose -f compose.yaml -f compose.windows.yaml --env-file .env.real stop postgres
 ```
 
 Для mock-режима:

@@ -65,6 +65,13 @@ await using (var scope = app.Services.CreateAsyncScope())
             CONSTRAINT "PK_ApplicationSettings" PRIMARY KEY ("Id")
         );
         """);
+    if (builder.Configuration.GetValue<bool>($"{DevScopeOptions.SectionName}:ClearCacheOnStartup"))
+    {
+        var clearedReports = await database.CachedReports.ExecuteDeleteAsync();
+        app.Logger.LogInformation(
+            "Cleared {ClearedReports} cached activity reports on startup.",
+            clearedReports);
+    }
 }
 
 app.UseExceptionHandler();

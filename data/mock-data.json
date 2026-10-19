@@ -29,6 +29,7 @@
       "url": "https://youtrack.example/issue/FINTDR-50102",
       "parentSummary": "Платформа API",
       "type": "Техническая задача",
+      "description": "Перевести backend API на .NET 10, сохранив совместимость контрактов и работу существующих сервисов.",
       "digitalTwinStarted": true,
       "tags": ["SODA"],
       "gitLab": {
@@ -37,6 +38,12 @@
         "mergeRequestIid": 1235,
         "mergeRequestState": "opened",
         "commitCount": 6,
+        "title": "Миграция backend API на .NET 10",
+        "description": "Обновление target framework, адаптация контрактов API и проверка совместимости интеграций.",
+        "commitTitles": ["Update target framework", "Adapt API contracts"],
+        "pipelineStatus": "success",
+        "unresolvedDiscussionCount": 0,
+        "hasConflicts": false,
         "linkSource": "comment",
         "url": "https://gitlab.example/fintender/example-backend/-/merge_requests/1235"
       }
@@ -50,12 +57,18 @@
       "url": "https://youtrack.example/issue/FINTDR-49880",
       "parentSummary": "Авторизация",
       "type": "Исправление дефекта",
+      "description": "Исправить возврат пользователя в приложение после OAuth-авторизации.",
       "gitLab": {
         "projectPath": "fintender/example-backend",
         "branch": "fix/FINTDR-49880",
         "mergeRequestIid": 1228,
         "mergeRequestState": "merged",
         "commitCount": 4,
+        "title": "Fix OAuth redirect handling",
+        "description": "Исправлена проверка return URL и добавлены тесты сценария возврата после OAuth.",
+        "pipelineStatus": "success",
+        "unresolvedDiscussionCount": 0,
+        "hasConflicts": false,
         "linkSource": "issue-key",
         "url": "https://gitlab.example/fintender/example-backend/-/merge_requests/1228"
       }
@@ -69,12 +82,18 @@
       "url": "https://youtrack.example/issue/FINTDR-50444",
       "parentSummary": "Платёжные поручения",
       "type": "Code Review",
+      "description": "Проверить обработку платёжных поручений и устранение замечаний перед слиянием.",
       "gitLab": {
         "projectPath": "fintender/example-frontend",
         "branch": "feature/FINTDR-50444",
         "mergeRequestIid": 1241,
         "mergeRequestState": "opened",
         "commitCount": 3,
+        "title": "Обработка платёжных поручений",
+        "description": "Добавлена явная обработка ошибок платёжных поручений и проверяющие тесты.",
+        "pipelineStatus": "running",
+        "unresolvedDiscussionCount": 1,
+        "hasConflicts": false,
         "linkSource": "comment",
         "url": "https://gitlab.example/fintender/example-frontend/-/merge_requests/1241"
       }

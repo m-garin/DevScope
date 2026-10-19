@@ -35,6 +35,16 @@ if not defined DEVSCOPE_DB_PORT set "DEVSCOPE_DB_PORT=5432"
 if not defined DEVSCOPE_DB_NAME set "DEVSCOPE_DB_NAME=devscope"
 if not defined DEVSCOPE_DB_USER set "DEVSCOPE_DB_USER=devscope"
 if not defined DEVSCOPE_DB_PASSWORD set "DEVSCOPE_DB_PASSWORD=devscope-local-only"
+if not defined LLM_ENABLED set "LLM_ENABLED=true"
+if not defined LLM_BASE_URL set "LLM_BASE_URL=https://code-generator.sovcombank.group/api/v1"
+if not defined LLM_ENDPOINT set "LLM_ENDPOINT=/chat/completions"
+if not defined LLM_TIMEOUT_SECONDS set "LLM_TIMEOUT_SECONDS=120"
+if not defined LLM_MAX_INPUT_CHARS set "LLM_MAX_INPUT_CHARS=8000"
+if not defined LLM_MAX_OUTPUT_TOKENS set "LLM_MAX_OUTPUT_TOKENS=600"
+if /i "%LLM_ENABLED%"=="true" if not defined LLM_TOKEN if not exist "%USERPROFILE%\.local\share\opencode\auth.json" (
+  echo ERROR: LLM token was not found. Set LLM_TOKEN in .env.real or configure OpenCode auth.json.
+  exit /b 1
+)
 
 echo [2/6] Stopping the Linux DevScope container...
 docker compose --env-file .env.real stop devscope >nul 2>&1
@@ -66,6 +76,13 @@ set "DevScope__ProjectKey=%DEVSCOPE_PROJECT_KEY%"
 set "DevScope__DeveloperGroup=%DEVSCOPE_DEVELOPER_GROUP%"
 set "DevScope__DailyRefreshHour=%DEVSCOPE_DAILY_REFRESH_HOUR%"
 set "DevScope__ClearCacheOnStartup=%CLEAR_CACHE%"
+set "Llm__Enabled=%LLM_ENABLED%"
+set "Llm__BaseUrl=%LLM_BASE_URL%"
+set "Llm__Endpoint=%LLM_ENDPOINT%"
+set "Llm__TimeoutSeconds=%LLM_TIMEOUT_SECONDS%"
+set "Llm__MaxInputChars=%LLM_MAX_INPUT_CHARS%"
+set "Llm__MaxOutputTokens=%LLM_MAX_OUTPUT_TOKENS%"
+if defined LLM_TOKEN set "Llm__Token=%LLM_TOKEN%"
 set "ConnectionStrings__DevScope=Host=127.0.0.1;Port=%DEVSCOPE_DB_PORT%;Database=%DEVSCOPE_DB_NAME%;Username=%DEVSCOPE_DB_USER%;Password=%DEVSCOPE_DB_PASSWORD%"
 
 echo [6/6] Starting DevScope on Windows...

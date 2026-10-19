@@ -626,7 +626,8 @@ public sealed partial class McpActivityProvider(
             ParseGitLabReference(issue),
             parent,
             issue.FirstProperty("type").StringValue() ?? Field("Type", "Тип1", "$Тип"),
-            HasTag(issue, "SODA"));
+            HasTag(issue, "SODA"),
+            issue.FirstProperty("description", "details").StringValue());
     }
 
     private static bool HasTag(JsonElement issue, string expectedTag)
@@ -1242,6 +1243,19 @@ public sealed partial class McpActivityProvider(
             .ToArray();
         var mergedAt = ParseTimestamp(mergeRequest.FirstProperty("merged_at", "mergedAt"));
         var commitItems = commits?.EnumerateArray().ToArray();
+        var commitTitles = commitItems?
+            .Select(commit => commit.FirstProperty("title", "message").StringValue())
+            .Where(title => !string.IsNullOrWhiteSpace(title))
+            .Select(title => title!.Split('\n', StringSplitOptions.RemoveEmptyEntries)[0].Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToArray() ?? [];
+        var pipeline = mergeRequest.FirstProperty("head_pipeline", "headPipeline", "pipeline")
+            ?? details.FirstProperty("head_pipeline", "headPipeline", "pipeline");
+        var pipelineStatus = pipeline is { ValueKind: JsonValueKind.Object }
+            ? pipeline.Value.FirstProperty("status").StringValue()
+            : mergeRequest.FirstProperty("pipeline_status", "pipelineStatus").StringValue()
+              ?? details.FirstProperty("pipeline_status", "pipelineStatus").StringValue();
         var employeeCommitCount = commitItems?.Count(commit => IsCommitByEmployee(commit, employee)) ?? 0;
         var otherCommitAuthors = commitItems?
             .Where(commit => !IsCommitByEmployee(commit, employee))
@@ -1267,9 +1281,74 @@ public sealed partial class McpActivityProvider(
             EmployeeMergedMergeRequest = IsEmployeeInUserProperty(mergeRequest, employee, "merged_by", "mergedBy", "merge_user", "mergeUser") ||
                                          employeeNotes.Any(note => IsMergeNote(note, mergedAt)),
             EmployeeResolvedThreads = employeeNotes.Any(IsThreadResolutionNote),
-            EmployeeActionFactsKnown = true
+            EmployeeActionFactsKnown = true,
+            Title = mergeRequest.FirstProperty("title").StringValue() ?? reference.Title,
+            Description = mergeRequest.FirstProperty("description").StringValue() ?? reference.Description,
+            CommitTitles = commitTitles,
+            PipelineStatus = pipelineStatus,
+            UnresolvedDiscussionCount = discussions is null ? null : TryCountUnresolvedDiscussions(discussions.Value),
+            HasConflicts = ReadBoolean(mergeRequest.FirstProperty("has_conflicts", "hasConflicts"))
+                ?? ReadBoolean(details.FirstProperty("has_conflicts", "hasConflicts"))
         };
         return EnsureMergeRequestUrl(enriched, details);
+    }
+
+    private static int? TryCountUnresolvedDiscussions(JsonElement discussions)
+    {
+        var resolutionKnown = false;
+        var unresolved = 0;
+        foreach (var discussion in discussions.EnumerateArray())
+        {
+            if (ReadBoolean(discussion.FirstProperty("resolved")) is { } discussionResolved)
+            {
+                resolutionKnown = true;
+                if (!discussionResolved)
+                {
+                    unresolved++;
+                }
+                continue;
+            }
+
+            if (discussion.FindArray("notes") is not { } notes)
+            {
+                continue;
+            }
+
+            var noteStates = notes.EnumerateArray()
+                .Where(note => ReadBoolean(note.FirstProperty("resolvable")) == true)
+                .Select(note => ReadBoolean(note.FirstProperty("resolved")))
+                .Where(resolved => resolved is not null)
+                .Select(resolved => resolved!.Value)
+                .ToArray();
+            if (noteStates.Length == 0)
+            {
+                continue;
+            }
+
+            resolutionKnown = true;
+            if (noteStates.Any(resolved => !resolved))
+            {
+                unresolved++;
+            }
+        }
+
+        return resolutionKnown ? unresolved : null;
+    }
+
+    private static bool? ReadBoolean(JsonElement? element)
+    {
+        if (element is null)
+        {
+            return null;
+        }
+
+        return element.Value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String when bool.TryParse(element.Value.GetString(), out var value) => value,
+            _ => null
+        };
     }
 
     private GitLabReference EnsureMergeRequestUrl(GitLabReference reference, JsonElement? payload = null)

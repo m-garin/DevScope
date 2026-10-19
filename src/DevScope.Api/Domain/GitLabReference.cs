@@ -18,4 +18,10 @@ public sealed record GitLabReference(
     bool EmployeeCreatedMergeRequest = false,
     bool EmployeeMergedMergeRequest = false,
     bool EmployeeResolvedThreads = false,
-    bool EmployeeActionFactsKnown = false);
+    bool EmployeeActionFactsKnown = false,
+    string? Title = null,
+    string? Description = null,
+    IReadOnlyList<string>? CommitTitles = null,
+    string? PipelineStatus = null,
+    int? UnresolvedDiscussionCount = null,
+    bool? HasConflicts = null);

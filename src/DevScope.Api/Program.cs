@@ -1,5 +1,6 @@
 using DevScope.Api.Configuration;
 using DevScope.Api.Data;
+using DevScope.Api.Integrations.Llm;
 using DevScope.Api.Integrations.Mcp;
 using DevScope.Api.Services.Implementations;
 using DevScope.Api.Services.Interfaces;
@@ -8,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<DevScopeOptions>(builder.Configuration.GetSection(DevScopeOptions.SectionName));
+builder.Services.Configure<LlmOptions>(builder.Configuration.GetSection(LlmOptions.SectionName));
 builder.Services.AddSingleton<IMcpConfigurationReader, McpConfigurationReader>();
 builder.Services.AddSingleton<IMcpGatewayClient, McpGatewayClient>();
 var dataSource = builder.Configuration[$"{DevScopeOptions.SectionName}:DataSource"] ?? "Mock";
@@ -38,7 +40,15 @@ else
         $"Unsupported DevScope:DataSource '{dataSource}'. Supported values: Mock, Mcp.");
 }
 
-builder.Services.AddSingleton<ITaskAnalysisService, MockTaskAnalysisService>();
+var llmEnabled = builder.Configuration.GetValue<bool>($"{LlmOptions.SectionName}:Enabled");
+if (llmEnabled)
+{
+    builder.Services.AddHttpClient<ITaskAnalysisService, LlmTaskAnalysisService>();
+}
+else
+{
+    builder.Services.AddSingleton<ITaskAnalysisService, MockTaskAnalysisService>();
+}
 builder.Services.AddScoped<IApplicationSettingsService, ApplicationSettingsService>();
 builder.Services.AddPooledDbContextFactory<DevScopeDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DevScope")
@@ -46,6 +56,7 @@ builder.Services.AddPooledDbContextFactory<DevScopeDbContext>(options =>
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<McpExceptionHandler>();
+builder.Services.AddExceptionHandler<LlmExceptionHandler>();
 builder.Services.AddHostedService<ActivityCacheRefreshJob>();
 
 var app = builder.Build();

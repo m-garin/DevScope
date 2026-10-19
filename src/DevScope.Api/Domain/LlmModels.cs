@@ -8,12 +8,12 @@ public sealed record LlmModelOption(
 
 public static class LlmModels
 {
-    public const string Default = "smart";
+    public const string Default = "basic";
 
     public static readonly IReadOnlyList<LlmModelOption> All =
     [
-        new("basic", "basic", "Универсальная модель, проверена для DevScope"),
-        new("smart", "smart", "Модель с reasoning для более сложного анализа", true),
+        new("basic", "basic", "Универсальная модель, проверена для DevScope", true),
+        new("smart", "smart", "Модель с reasoning для более сложного анализа"),
         new("coding-ultima", "coding-ultima", "Кодовая модель с большим контекстом"),
         new("expert", "expert", "Экспертный профиль"),
         new("coding-expert", "coding-expert", "Экспертный профиль для кода"),

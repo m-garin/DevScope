@@ -30,7 +30,18 @@
 DEVSCOPE_PROJECT_KEY=FINTDR
 DEVSCOPE_DEVELOPER_GROUP=Fintender-Backend
 DEVSCOPE_GITLAB_BASE_URL=https://gitlab.example.com
+LLM_ENABLED=true
+LLM_BASE_URL=https://code-generator.sovcombank.group/api/v1
+LLM_ENDPOINT=/chat/completions
 ```
+
+На Windows токен по умолчанию читается из
+`%USERPROFILE%\.local\share\opencode\auth.json` (`scbt-copilot.key`). Его также
+можно передать локально через `LLM_TOKEN`; токен не логируется и не отправляется
+во frontend. В LLM уходит только сокращённый контекст одной выбранной задачи:
+описание задачи до 1500 символов, описание MR до 1000 символов, до 5 заголовков
+коммитов и статусы MR. Пути файлов, исходный код, diff и тексты обсуждений не
+отправляются.
 
 `DEVSCOPE_GITLAB_BASE_URL` используется как резервный адрес для формирования
 ссылки на MR, если GitLab MCP не вернул `web_url`. Сначала приложение пытается
@@ -125,7 +136,7 @@ http://127.0.0.1:8080/api/configuration/mcp/tools
 
 На экране «Настройки» выбираются:
 
-- единая LLM-модель (по умолчанию `smart`);
+- единая LLM-модель (по умолчанию `basic`);
 - обновление кэша раз в час или раз в день (по умолчанию — раз в день в 03:00);
 - немедленное обновление кэша кнопкой «Обновить сейчас».
 

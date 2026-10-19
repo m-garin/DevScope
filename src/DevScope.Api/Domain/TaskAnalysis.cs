@@ -5,7 +5,7 @@ public sealed record TaskAnalysis(
     string Context,
     string Type,
     string TaskSummary,
-    string EmployeeContribution,
-    string Result,
+    string MergeSummary,
+    string StatusAndChecks,
     string Model,
     DateTimeOffset GeneratedAt);

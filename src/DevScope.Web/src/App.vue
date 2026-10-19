@@ -445,9 +445,9 @@ watch(selectedModel, value => {
                   <strong>{{ taskAnalyses[item.task.id].type }}</strong>
                 </div>
                 <dl>
-                  <div><dt>О чём задача</dt><dd>{{ taskAnalyses[item.task.id].taskSummary }}</dd></div>
-                  <div><dt>Что сделал сотрудник</dt><dd>{{ taskAnalyses[item.task.id].employeeContribution }}</dd></div>
-                  <div><dt>Результат</dt><dd>{{ taskAnalyses[item.task.id].result }}</dd></div>
+                  <div><dt>Задача</dt><dd>{{ taskAnalyses[item.task.id].taskSummary }}</dd></div>
+                  <div><dt>В MR</dt><dd>{{ taskAnalyses[item.task.id].mergeSummary }}</dd></div>
+                  <div><dt>Статус и проверка</dt><dd>{{ taskAnalyses[item.task.id].statusAndChecks }}</dd></div>
                 </dl>
               </section>
             </article>

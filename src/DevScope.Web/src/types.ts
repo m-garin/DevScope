@@ -35,6 +35,12 @@ export interface GitLabReference {
   employeeMergedMergeRequest?: boolean
   employeeResolvedThreads?: boolean
   employeeActionFactsKnown?: boolean
+  title?: string
+  description?: string
+  commitTitles?: string[]
+  pipelineStatus?: string
+  unresolvedDiscussionCount?: number
+  hasConflicts?: boolean
 }
 
 export interface TaskActivity {
@@ -47,6 +53,7 @@ export interface TaskActivity {
     url: string
     gitLab?: GitLabReference
     digitalTwinStarted: boolean
+    description?: string
   }
   loggedMinutes: number
   worklogs: Worklog[]
@@ -85,8 +92,8 @@ export interface TaskAnalysis {
   context: string
   type: string
   taskSummary: string
-  employeeContribution: string
-  result: string
+  mergeSummary: string
+  statusAndChecks: string
   model: string
   generatedAt: string
 }
